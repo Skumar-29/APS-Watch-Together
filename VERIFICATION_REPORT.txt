@@ -1,53 +1,35 @@
-APS Watch Together v1.2.0 — Verification Report
-Generated: 2026-08-02
+APS Watch Together v1.3.0 — Verification Report
+Generated: 2 August 2026
 
-Release scope
--------------
-- Netflix-safe player bridge from v1.0.3
-- macOS camera/microphone permission flow
-- Settings close controls
-- Full-panel to Cinema Mode handoff
-- Local and remote camera rendering in Cinema Mode
-- Independent Me and Friends show/hide controls
-- Four layouts: both visible, Me only, Friends only, both hidden
-- Always-on-top floating call with the same visibility controls
-- Render Free plan retained in render.yaml
+RELEASE PURPOSE
+Adds four call participation modes so a participant can join without a camera, without a microphone, or without either device.
 
-Automated checks passed
------------------------
-1. JavaScript syntax checks for all extension, server, test and build files.
-2. Manifest V3 JSON parse and required version 1.2.0 validation.
-3. HTML local-reference validation.
-4. Duplicate HTML ID validation.
-5. Inline script and event-handler validation.
-6. No eval() usage detected.
-7. Cinema UI source checks for Me/Friends controls, remote grid and saved preferences.
-8. Friend release package built with version 1.2.0.
-9. Friend release package contains the configured production server:
-   wss://aps-watch-together-server.onrender.com/ws
-10. Six signalling-server integration tests passed:
+AUTOMATED CHECKS PASSED
+1. JavaScript syntax validation for every extension, server, test and build file.
+2. Manifest V3 JSON validation and required version 1.3.0 check.
+3. Required extension-file and package-reference checks.
+4. Duplicate HTML ID validation across all extension pages.
+5. Manifest V3 inline-script security validation.
+6. Four setup modes verified in the interface: Video + Audio, Audio only, Video only and Watch only.
+7. Camera and microphone are acquired independently, allowing partial-device fallback.
+8. Permission screen includes Continue in Watch only mode.
+9. Side-panel and Cinema Mode WebRTC peers add receive-only audio/video transceivers when local tracks are absent.
+10. Watch-only and partial-media state signalling is present in both full controls and Cinema Mode.
+11. Render Blueprint still uses plan: free.
+12. Friend build contains the configured room server:
+    wss://aps-watch-together-server.onrender.com/ws
+13. Localhost development URL is absent from the built friend package.
+14. Friend ZIP integrity test passed with no compressed-data errors.
+15. Six room-server integration tests passed:
     - room creation, friend join and playback relay
-    - host-only and shared playback permissions
-    - host transfer after intentional leave
-    - host recovery after short disconnection
+    - host-only controls and shared-control switching
+    - host transfer after leaving
+    - host reconnection grace
     - room lock and reopen
-    - full-panel to Cinema Mode host handoff without guest takeover
+    - full-panel to Cinema Mode host handoff
 
-Live testing still required
----------------------------
-The controlled environment blocks browser navigation and unpacked-extension loading by
-administrator policy. It also cannot sign in to the user's Netflix, Prime Video or ZEE5
-accounts or connect two physical cameras/laptops. The first real two-laptop test remains
-the decisive confirmation for remote video rendering, macOS window placement and OTT
-player behaviour.
+IMPORTANT LIVE-TEST BOUNDARY
+This environment cannot attach physical cameras or microphones, load the unpacked extension into the user's Chrome profile, access OTT accounts, or connect two real laptops. The no-camera, no-microphone, Audio-only, Video-only, Watch-only, remote camera reception and live Netflix/Prime Video/ZEE5 behaviours require confirmation on real devices.
 
-Expected Cinema Mode workflow
------------------------------
-1. Join or create a room in the full side panel.
-2. Click Cinema.
-3. Cinema Mode joins the same room and preserves host ownership.
-4. The full side panel closes automatically.
-5. Friend camera streams appear in the compact window.
-6. Use Me and Friends independently to hide or show either camera group.
-7. Click Float call for an always-on-top movable view with the same toggles.
-8. Click Full controls to restore the side panel safely.
+RELEASE ASSESSMENT
+Engineering package is ready for real-device testing. It should replace v1.2.0 for the owner and friends after testing the four participation modes on two laptops.

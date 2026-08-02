@@ -45,6 +45,28 @@
           <label class="field-label" for="displayName">Your name</label>
           <input id="displayName" class="text-input" maxlength="32" autocomplete="name" placeholder="e.g. Sandeep">
 
+          <div class="media-mode-block">
+            <div class="media-mode-heading">
+              <span class="field-label">Join call as</span>
+              <span id="mediaModeStatus" class="media-mode-status">Camera + microphone</span>
+            </div>
+            <div id="mediaModeChoices" class="media-mode-choices" role="radiogroup" aria-label="Choose camera and microphone mode">
+              <button class="media-choice active" type="button" role="radio" aria-checked="true" data-media-mode="av">
+                <span class="media-choice-icon">◉</span><span><strong>Video + audio</strong><small>Full call experience</small></span>
+              </button>
+              <button class="media-choice" type="button" role="radio" aria-checked="false" data-media-mode="audio">
+                <span class="media-choice-icon">♪</span><span><strong>Audio only</strong><small>No camera needed</small></span>
+              </button>
+              <button class="media-choice" type="button" role="radio" aria-checked="false" data-media-mode="video">
+                <span class="media-choice-icon">▣</span><span><strong>Video only</strong><small>No microphone needed</small></span>
+              </button>
+              <button class="media-choice" type="button" role="radio" aria-checked="false" data-media-mode="watch">
+                <span class="media-choice-icon">▶</span><span><strong>Watch only</strong><small>No camera or microphone</small></span>
+              </button>
+            </div>
+            <p id="mediaModeHint" class="media-mode-hint">APS will automatically continue with any available device if one is missing.</p>
+          </div>
+
           <button id="createRoomBtn" class="primary-btn" type="button">
             <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7L8 5Z"/></svg>
             Create private room
@@ -111,7 +133,7 @@
           <article id="localVideoCard" class="video-card local-card">
             <video id="localVideo" autoplay muted playsinline></video>
             <div class="video-fallback" id="localFallback"><span id="localInitial">Y</span></div>
-            <div class="video-meta"><span>You</span><span id="localMicState" class="mini-status"></span></div>
+            <div class="video-meta"><span>You <small id="localModeLabel">VIDEO + AUDIO</small></span><span id="localMicState" class="mini-status"></span></div>
           </article>
         </div>
 

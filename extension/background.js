@@ -57,7 +57,8 @@ chrome.runtime.onInstalled.addListener(async ({ reason }) => {
       apsProfile: {
         displayName: '',
         avatarSeed: crypto.randomUUID()
-      }
+      },
+      apsMediaMode: 'av'
     });
   }
 

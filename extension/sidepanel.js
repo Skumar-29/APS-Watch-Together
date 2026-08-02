@@ -12,6 +12,13 @@ const ICONS = {
   cameraSmall: '<svg viewBox="0 0 24 24"><path d="M4 5h11a2 2 0 0 1 2 2v2.2l4-2.5v10.6l-4-2.5V17a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/></svg>'
 };
 
+const MEDIA_MODES = {
+  av: { label: 'VIDEO + AUDIO', status: 'Camera + microphone', audio: true, video: true },
+  audio: { label: 'AUDIO ONLY', status: 'Microphone only', audio: true, video: false },
+  video: { label: 'VIDEO ONLY', status: 'Camera only', audio: false, video: true },
+  watch: { label: 'WATCH ONLY', status: 'No camera or microphone', audio: false, video: false }
+};
+
 const app = {
   profile: { displayName: '', avatarSeed: '' },
   settings: null,
@@ -27,7 +34,10 @@ const app = {
   peerConnections: new Map(),
   remoteStreams: new Map(),
   localStream: null,
+  mediaMode: 'av',
+  mediaAvailable: { audio: false, video: false },
   mediaEnabled: { audio: true, video: true },
+  mediaWarnings: [],
   sharedControls: false,
   roomLocked: false,
   player: null,
@@ -48,6 +58,7 @@ const app = {
 
 const elements = {
   setupView: $('#setupView'), roomView: $('#roomView'), displayName: $('#displayName'), roomCodeInput: $('#roomCodeInput'),
+  mediaModeChoices: $('#mediaModeChoices'), mediaModeStatus: $('#mediaModeStatus'), mediaModeHint: $('#mediaModeHint'),
   createRoomBtn: $('#createRoomBtn'), joinRoomBtn: $('#joinRoomBtn'), openSettingsBtn: $('#openSettingsBtn'),
   connectionCaption: $('#connectionCaption'), roomCodeText: $('#roomCodeText'), copyRoomCodeBtn: $('#copyRoomCodeBtn'),
   roleBadge: $('#roleBadge'), leaveRoomBtn: $('#leaveRoomBtn'), serviceBadge: $('#serviceBadge'), syncBadge: $('#syncBadge'),
@@ -55,16 +66,17 @@ const elements = {
   rewindBtn: $('#rewindBtn'), playPauseBtn: $('#playPauseBtn'), playPauseIcon: $('#playPauseIcon'), forwardBtn: $('#forwardBtn'),
   resyncBtn: $('#resyncBtn'), playerMessage: $('#playerMessage'), participantCount: $('#participantCount'), peopleCountPill: $('#peopleCountPill'),
   videoGrid: $('#videoGrid'), localVideoCard: $('#localVideoCard'), localVideo: $('#localVideo'), localFallback: $('#localFallback'), localInitial: $('#localInitial'),
-  cinemaModeBtn: $('#cinemaModeBtn'), toggleMicBtn: $('#toggleMicBtn'), toggleCameraBtn: $('#toggleCameraBtn'), localMicState: $('#localMicState'), peopleTabBtn: $('#peopleTabBtn'),
+  cinemaModeBtn: $('#cinemaModeBtn'), toggleMicBtn: $('#toggleMicBtn'), toggleCameraBtn: $('#toggleCameraBtn'), localMicState: $('#localMicState'), localModeLabel: $('#localModeLabel'), peopleTabBtn: $('#peopleTabBtn'),
   chatTabBtn: $('#chatTabBtn'), peoplePanel: $('#peoplePanel'), chatPanel: $('#chatPanel'), peopleList: $('#peopleList'), unreadPill: $('#unreadPill'),
   sharedControlsToggle: $('#sharedControlsToggle'), roomLockToggle: $('#roomLockToggle'), chatForm: $('#chatForm'), chatInput: $('#chatInput'), messages: $('#messages'),
   toastRegion: $('#toastRegion'), reactionLayer: $('#reactionLayer')
 };
 
 async function init() {
-  const stored = await chrome.storage.local.get(['apsSettings', 'apsProfile', 'apsActiveRoom', 'apsRestoreRoom']);
+  const stored = await chrome.storage.local.get(['apsSettings', 'apsProfile', 'apsActiveRoom', 'apsRestoreRoom', 'apsMediaMode']);
   app.settings = stored.apsSettings || {};
   app.profile = stored.apsProfile || { displayName: '', avatarSeed: crypto.randomUUID() };
+  setMediaMode(stored.apsMediaMode || stored.apsActiveRoom?.mediaMode || 'av', false);
   elements.displayName.value = app.profile.displayName || '';
   elements.localInitial.textContent = initialOf(app.profile.displayName || 'You');
 
@@ -79,7 +91,8 @@ async function init() {
   const validRestore = restore?.roomCode && restore.expiresAt > Date.now() && active?.roomCode === restore.roomCode;
   if (validRestore) {
     app.restoreInProgress = true;
-    app.pendingJoin = { mode: 'join', roomCode: restore.roomCode };
+    setMediaMode(active.mediaMode || stored.apsMediaMode || 'av', false);
+    app.pendingJoin = { mode: 'join', roomCode: restore.roomCode, mediaMode: app.mediaMode };
     app.intentionallyLeft = false;
     setBusy(true, 'Restoring…');
     try {
@@ -108,6 +121,10 @@ function bindEvents() {
   elements.displayName.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') beginRoomFlow('create');
   });
+  elements.mediaModeChoices.addEventListener('click', (event) => {
+    const choice = event.target.closest('[data-media-mode]');
+    if (choice) setMediaMode(choice.dataset.mediaMode, true);
+  });
   elements.openSettingsBtn.addEventListener('click', () => chrome.runtime.openOptionsPage());
   elements.copyRoomCodeBtn.addEventListener('click', copyInvite);
   elements.leaveRoomBtn.addEventListener('click', leaveRoom);
@@ -130,6 +147,7 @@ function bindEvents() {
   chrome.runtime.onMessage.addListener((message, sender) => {
     if (message?.type === 'APS_MEDIA_PERMISSION_GRANTED') {
       app.permissionTabOpen = false;
+      if (message.mediaMode && MEDIA_MODES[message.mediaMode]) setMediaMode(message.mediaMode, true);
       resumeRoomFlowAfterPermission();
       return;
     }
@@ -156,6 +174,23 @@ function bindEvents() {
   });
 }
 
+function setMediaMode(mode, persist = true) {
+  const next = MEDIA_MODES[mode] ? mode : 'av';
+  app.mediaMode = next;
+  const config = MEDIA_MODES[next];
+  if (!app.roomCode) app.mediaEnabled = { audio: config.audio, video: config.video };
+  elements.mediaModeStatus.textContent = config.status;
+  elements.mediaModeHint.textContent = next === 'watch'
+    ? 'You can still watch in sync, use chat and reactions, and see or hear friends who share media.'
+    : 'APS automatically continues with any available selected device if one is missing.';
+  for (const button of elements.mediaModeChoices.querySelectorAll('[data-media-mode]')) {
+    const active = button.dataset.mediaMode === next;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-checked', String(active));
+  }
+  if (persist) chrome.storage.local.set({ apsMediaMode: next });
+}
+
 async function beginRoomFlow(mode) {
   const displayName = elements.displayName.value.trim().replace(/\s+/g, ' ').slice(0, 32);
   if (displayName.length < 2) {
@@ -175,14 +210,14 @@ async function beginRoomFlow(mode) {
   }
 
   app.profile.displayName = displayName;
-  await chrome.storage.local.set({ apsProfile: app.profile });
+  await chrome.storage.local.set({ apsProfile: app.profile, apsMediaMode: app.mediaMode });
   elements.localInitial.textContent = initialOf(displayName);
-  app.pendingJoin = { mode, roomCode };
+  app.pendingJoin = { mode, roomCode, mediaMode: app.mediaMode };
   app.intentionallyLeft = false;
 
   setBusy(true, mode === 'create' ? 'Creating…' : 'Joining…');
   try {
-    await ensureLocalMedia();
+    await ensureLocalMedia(app.mediaMode);
     connectSocket();
   } catch (error) {
     if (isMediaPermissionError(error)) {
@@ -195,27 +230,29 @@ async function beginRoomFlow(mode) {
 }
 
 function isMediaPermissionError(error) {
-  return ['NotAllowedError', 'PermissionDeniedError', 'SecurityError'].includes(error?.name)
+  return Boolean(error?.apsPermissionError)
+    || ['NotAllowedError', 'PermissionDeniedError', 'SecurityError'].includes(error?.name)
     || /permission|not allowed|dismissed|denied/i.test(String(error?.message || ''));
 }
 
 function describeMediaError(error) {
-  if (error?.name === 'NotFoundError') return 'No camera or microphone was found. Connect a device and try again.';
-  if (error?.name === 'NotReadableError') return 'Your camera or microphone is being used by another app. Close FaceTime, Zoom or Teams and try again.';
+  if (error?.name === 'NotReadableError') return 'A selected camera or microphone is being used by another app. Close FaceTime, Zoom or Teams and try again.';
   if (error?.name === 'OverconstrainedError') return 'The selected camera quality is unavailable. Choose 720p in Settings and try again.';
-  return error?.message || 'Camera and microphone could not be started.';
+  return error?.message || 'The selected call devices could not be started.';
 }
 
 async function openMediaPermissionTab() {
   setBusy(false);
   if (app.permissionTabOpen) {
-    toast('Complete the camera and microphone permission tab, then return here.', 'error');
+    toast('Complete the camera or microphone permission tab, then return here.', 'error');
     return;
   }
   app.permissionTabOpen = true;
   try {
-    await chrome.tabs.create({ url: chrome.runtime.getURL('request-permissions.html'), active: true });
-    toast('A permission tab opened. Click Allow camera & microphone.', 'success');
+    const url = new URL(chrome.runtime.getURL('request-permissions.html'));
+    url.searchParams.set('mode', app.mediaMode);
+    await chrome.tabs.create({ url: url.href, active: true });
+    toast('A permission tab opened. Allow the selected call devices or continue in Watch only mode.', 'success');
   } catch (error) {
     app.permissionTabOpen = false;
     toast(error?.message || 'Could not open the permission page.', 'error');
@@ -224,9 +261,10 @@ async function openMediaPermissionTab() {
 
 async function resumeRoomFlowAfterPermission() {
   if (!app.pendingJoin) return;
+  app.pendingJoin.mediaMode = app.mediaMode;
   setBusy(true, app.pendingJoin.mode === 'create' ? 'Creating…' : 'Joining…');
   try {
-    await ensureLocalMedia();
+    await ensureLocalMedia(app.mediaMode);
     connectSocket();
   } catch (error) {
     setBusy(false);
@@ -259,7 +297,7 @@ function connectSocket() {
       displayName: app.profile.displayName,
       clientVersion: chrome.runtime.getManifest().version,
       sessionId: app.profile.avatarSeed,
-      capabilities: { playback: true, video: true, chat: true }
+      capabilities: { playback: true, audio: app.mediaEnabled.audio, video: app.mediaEnabled.video, chat: true }
     });
     if (app.pendingJoin?.mode === 'create') sendSocket({ type: 'create-room' });
     else if (app.pendingJoin?.mode === 'join') sendSocket({ type: 'join-room', roomCode: app.pendingJoin.roomCode });
@@ -400,6 +438,8 @@ function enterRoom(message) {
     apsActiveRoom: {
       roomCode: app.roomCode,
       displayName: app.profile.displayName,
+      mediaMode: app.mediaMode,
+      media: { ...app.mediaEnabled },
       updatedAt: Date.now(),
       expiresAt: Date.now() + 8 * 60 * 60 * 1000
     }
@@ -412,6 +452,12 @@ function enterRoom(message) {
 
   for (const participant of app.participants.values()) {
     if (participant.id !== app.selfId) createPeerOffer(participant.id);
+  }
+  sendSocket({ type: 'media-state', media: app.mediaEnabled });
+  applyLocalMediaState(false);
+  if (app.mediaWarnings.length) {
+    toast(app.mediaWarnings.join(' '), app.mediaAvailable.audio || app.mediaAvailable.video ? 'success' : 'error');
+    app.mediaWarnings = [];
   }
 }
 
@@ -475,59 +521,143 @@ function updateControlPermissions() {
       : 'Only the host can control playback in this room.';
 }
 
-async function ensureLocalMedia() {
-  if (app.localStream?.active) return app.localStream;
-  if (!navigator.mediaDevices?.getUserMedia) throw new Error('Camera access is unavailable in this browser.');
-
+function videoConstraintsForQuality() {
   const quality = app.settings.videoQuality || 'hd';
-  const videoConstraints = quality === 'fullhd'
+  return quality === 'fullhd'
     ? { width: { ideal: 1920, max: 1920 }, height: { ideal: 1080, max: 1080 }, frameRate: { ideal: 30, max: 30 }, facingMode: 'user' }
     : quality === 'sd'
       ? { width: { ideal: 640 }, height: { ideal: 360 }, frameRate: { ideal: 24, max: 30 }, facingMode: 'user' }
       : { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 30 }, facingMode: 'user' };
+}
 
-  app.localStream = await navigator.mediaDevices.getUserMedia({
-    video: videoConstraints,
-    audio: {
-      echoCancellation: app.settings.echoCancellation !== false,
-      noiseSuppression: app.settings.noiseSuppression !== false,
-      autoGainControl: app.settings.autoGainControl !== false,
-      channelCount: 1
+function audioConstraints() {
+  return {
+    echoCancellation: app.settings.echoCancellation !== false,
+    noiseSuppression: app.settings.noiseSuppression !== false,
+    autoGainControl: app.settings.autoGainControl !== false,
+    channelCount: 1
+  };
+}
+
+async function requestMediaKind(kind) {
+  const constraints = kind === 'video'
+    ? { video: videoConstraintsForQuality(), audio: false }
+    : { video: false, audio: audioConstraints() };
+  return navigator.mediaDevices.getUserMedia(constraints);
+}
+
+async function ensureLocalMedia(mode = app.mediaMode) {
+  stopLocalMedia();
+  const requested = MEDIA_MODES[mode] || MEDIA_MODES.av;
+  app.mediaWarnings = [];
+  app.mediaAvailable = { audio: false, video: false };
+  app.mediaEnabled = { audio: false, video: false };
+
+  if (!requested.audio && !requested.video) {
+    app.localStream = new MediaStream();
+    applyLocalMediaState(false);
+    return app.localStream;
+  }
+  if (!navigator.mediaDevices?.getUserMedia) {
+    app.mediaWarnings.push('Camera and microphone access is unavailable in this browser. Joined in Watch only mode.');
+    app.localStream = new MediaStream();
+    applyLocalMediaState(false);
+    return app.localStream;
+  }
+
+  const combined = new MediaStream();
+  const permissionErrors = [];
+  for (const kind of ['video', 'audio']) {
+    if (!requested[kind]) continue;
+    try {
+      const partial = await requestMediaKind(kind);
+      for (const track of partial.getTracks()) combined.addTrack(track);
+    } catch (error) {
+      if (isMediaPermissionError(error)) permissionErrors.push(error);
+      else if (error?.name === 'NotFoundError') app.mediaWarnings.push(`No ${kind === 'video' ? 'camera' : 'microphone'} was found.`);
+      else if (error?.name === 'NotReadableError') app.mediaWarnings.push(`The ${kind === 'video' ? 'camera' : 'microphone'} is busy in another app.`);
+      else app.mediaWarnings.push(`${kind === 'video' ? 'Camera' : 'Microphone'} unavailable: ${error?.message || 'unknown device error'}.`);
     }
-  });
-  elements.localVideo.srcObject = app.localStream;
-  elements.localVideoCard.classList.add('has-video');
-  applyLocalMediaState();
-  return app.localStream;
+  }
+
+  if (!combined.getTracks().length && permissionErrors.length) {
+    const error = new Error('Permission is required for the selected call devices.');
+    error.name = 'NotAllowedError';
+    error.apsPermissionError = true;
+    throw error;
+  }
+  if (permissionErrors.length) {
+    app.mediaWarnings.push('One selected device was blocked. APS continued with the device that is available.');
+  }
+
+  app.localStream = combined;
+  app.mediaAvailable = {
+    audio: combined.getAudioTracks().some((track) => track.readyState === 'live'),
+    video: combined.getVideoTracks().some((track) => track.readyState === 'live')
+  };
+  app.mediaEnabled = { ...app.mediaAvailable };
+  elements.localVideo.srcObject = combined;
+  if (app.mediaAvailable.video) elements.localVideo.play().catch(() => undefined);
+  if (!combined.getTracks().length) app.mediaWarnings.push('No selected call device is available. Joined in Watch only mode.');
+  applyLocalMediaState(false);
+  return combined;
 }
 
 function stopLocalMedia() {
   app.localStream?.getTracks().forEach((track) => track.stop());
   app.localStream = null;
+  app.mediaAvailable = { audio: false, video: false };
+  elements.localVideo.srcObject = null;
 }
 
-function applyLocalMediaState() {
-  if (!app.localStream) return;
-  for (const track of app.localStream.getAudioTracks()) track.enabled = app.mediaEnabled.audio;
-  for (const track of app.localStream.getVideoTracks()) track.enabled = app.mediaEnabled.video;
-  elements.toggleMicBtn.className = `round-action ${app.mediaEnabled.audio ? 'active' : 'off'}`;
+function effectiveMediaLabel() {
+  if (app.mediaAvailable.audio && app.mediaAvailable.video) return MEDIA_MODES.av.label;
+  if (app.mediaAvailable.audio) return MEDIA_MODES.audio.label;
+  if (app.mediaAvailable.video) return MEDIA_MODES.video.label;
+  return MEDIA_MODES.watch.label;
+}
+
+function applyLocalMediaState(broadcast = true) {
+  const audioTracks = app.localStream?.getAudioTracks() || [];
+  const videoTracks = app.localStream?.getVideoTracks() || [];
+  app.mediaAvailable = {
+    audio: audioTracks.some((track) => track.readyState === 'live'),
+    video: videoTracks.some((track) => track.readyState === 'live')
+  };
+  app.mediaEnabled.audio = Boolean(app.mediaAvailable.audio && app.mediaEnabled.audio);
+  app.mediaEnabled.video = Boolean(app.mediaAvailable.video && app.mediaEnabled.video);
+  for (const track of audioTracks) track.enabled = app.mediaEnabled.audio;
+  for (const track of videoTracks) track.enabled = app.mediaEnabled.video;
+
+  elements.toggleMicBtn.disabled = !app.mediaAvailable.audio;
+  elements.toggleMicBtn.className = `round-action ${app.mediaAvailable.audio ? (app.mediaEnabled.audio ? 'active' : 'off') : 'unavailable'}`;
   elements.toggleMicBtn.querySelector('svg').innerHTML = app.mediaEnabled.audio ? ICONS.mic : ICONS.micOff;
-  elements.toggleCameraBtn.className = `round-action ${app.mediaEnabled.video ? 'active' : 'off'}`;
+  elements.toggleMicBtn.title = app.mediaAvailable.audio ? (app.mediaEnabled.audio ? 'Mute microphone' : 'Unmute microphone') : 'No microphone is active in this session';
+  elements.toggleMicBtn.setAttribute('aria-label', elements.toggleMicBtn.title);
+
+  elements.toggleCameraBtn.disabled = !app.mediaAvailable.video;
+  elements.toggleCameraBtn.className = `round-action ${app.mediaAvailable.video ? (app.mediaEnabled.video ? 'active' : 'off') : 'unavailable'}`;
   elements.toggleCameraBtn.querySelector('svg').innerHTML = app.mediaEnabled.video ? ICONS.camera : ICONS.cameraOff;
-  elements.localVideoCard.classList.toggle('has-video', app.mediaEnabled.video);
+  elements.toggleCameraBtn.title = app.mediaAvailable.video ? (app.mediaEnabled.video ? 'Turn camera off' : 'Turn camera on') : 'No camera is active in this session';
+  elements.toggleCameraBtn.setAttribute('aria-label', elements.toggleCameraBtn.title);
+
+  elements.localVideoCard.classList.toggle('has-video', app.mediaEnabled.video && app.mediaAvailable.video);
   elements.localMicState.classList.toggle('off', !app.mediaEnabled.audio);
+  elements.localModeLabel.textContent = effectiveMediaLabel();
   const self = app.participants.get(app.selfId);
   if (self) self.media = { ...app.mediaEnabled };
-  sendSocket({ type: 'media-state', media: app.mediaEnabled });
+  if (broadcast) sendSocket({ type: 'media-state', media: app.mediaEnabled });
   renderPeople();
 }
 
 function toggleMicrophone() {
+  if (!app.mediaAvailable.audio) return toast('No microphone is active. Rejoin with Audio enabled after connecting a microphone.', 'error');
   app.mediaEnabled.audio = !app.mediaEnabled.audio;
   applyLocalMediaState();
 }
 
 function toggleCamera() {
+  if (!app.mediaAvailable.video) return toast('No camera is active. Rejoin with Video enabled after connecting a camera.', 'error');
   app.mediaEnabled.video = !app.mediaEnabled.video;
   applyLocalMediaState();
 }
@@ -547,8 +677,14 @@ function getOrCreatePeer(peerId) {
 
   pc = new RTCPeerConnection(rtcConfig());
   app.peerConnections.set(peerId, pc);
-  const stream = app.localStream;
-  if (stream) stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+  const stream = app.localStream || new MediaStream();
+  const localKinds = new Set();
+  for (const track of stream.getTracks()) {
+    localKinds.add(track.kind);
+    pc.addTrack(track, stream);
+  }
+  if (!localKinds.has('audio')) pc.addTransceiver('audio', { direction: 'recvonly' });
+  if (!localKinds.has('video')) pc.addTransceiver('video', { direction: 'recvonly' });
 
   pc.onicecandidate = (event) => {
     if (event.candidate) sendSocket({ type: 'signal', targetId: peerId, signal: { candidate: event.candidate } });
@@ -948,6 +1084,8 @@ async function startCinemaMode() {
     apsActiveRoom: {
       roomCode: app.roomCode,
       displayName: app.profile.displayName,
+      mediaMode: app.mediaMode,
+      media: { ...app.mediaEnabled },
       updatedAt: Date.now(),
       expiresAt: Date.now() + 8 * 60 * 60 * 1000
     }

@@ -4,7 +4,7 @@ A private Chrome extension for synchronized Netflix, Prime Video and ZEE5 playba
 
 > APS Watch Together does not stream, copy, record or retransmit movies. Every participant watches through their own account. The project is independent and is not affiliated with Netflix, Amazon or ZEE5.
 
-## Included in version 1.2.0
+## Included in version 1.3.0
 
 - Chrome Manifest V3 extension
 - Polished persistent side-panel interface
@@ -17,6 +17,9 @@ A private Chrome extension for synchronized Netflix, Prime Video and ZEE5 playba
 - Active HTML5 player detection for Netflix, Prime Video and ZEE5
 - Wrong-service and clearly different-title protection
 - Peer-to-peer WebRTC video calls
+- Four participation modes: Video + Audio, Audio only, Video only and Watch only
+- Automatic fallback when a selected camera or microphone is missing
+- Receive-only WebRTC support so Watch-only participants can still see and hear friends
 - Camera and microphone controls
 - 360p, 720p and 1080p call-quality settings
 - Echo cancellation, noise suppression and automatic microphone level
@@ -94,7 +97,7 @@ The extension requests permanent access only to its supported streaming sites. A
 2. Open the same movie or episode on every laptop.
 3. Click the APS extension icon to open the side panel.
 4. The host creates a private room and shares its code.
-5. Friends join and grant camera/microphone permission.
+5. Friends choose Video + Audio, Audio only, Video only or Watch only, then grant only the permissions they selected.
 6. The host controls Play, Pause, Seek and Resync.
 
 A streaming site or Chrome may require each participant to click its video player once before the first remote Play command. Later commands should work after this activation.
@@ -181,4 +184,4 @@ START_HERE.html  Visual owner setup guide
 
 ## Browser scope
 
-Version 1.1 is Chrome-first on macOS and Windows. Safari packaging can follow after Chrome playback adapters are stable. Safari requires an Xcode wrapper and separate platform testing.
+Version 1.3 is Chrome-first on macOS and Windows. Safari packaging can follow after Chrome playback adapters are stable. Safari requires an Xcode wrapper and separate platform testing.

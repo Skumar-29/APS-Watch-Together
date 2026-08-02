@@ -239,3 +239,17 @@ main { padding: 14px; }
 .cinema-mode-btn:hover { transform: translateY(-1px); background: linear-gradient(135deg, rgba(139,92,246,.26), rgba(8,145,178,.24)); }
 .cinema-mode-btn:disabled { opacity: .5; cursor: wait; transform: none; }
 @media (max-width: 370px) { .cinema-mode-btn span { display: none; } .cinema-mode-btn { width: 34px; padding: 0; justify-content: center; } }
+
+/* V1.3 call participation modes */
+.media-mode-block{margin-top:15px;padding:13px;border:1px solid rgba(148,163,184,.16);border-radius:15px;background:rgba(2,6,23,.34)}
+.media-mode-heading{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}.media-mode-heading .field-label{margin:0}.media-mode-status{font-size:9px;color:#a5f3fc;font-weight:800}
+.media-mode-choices{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+.media-choice{min-height:54px;display:flex;align-items:center;gap:8px;padding:8px 9px;border:1px solid rgba(148,163,184,.16);border-radius:12px;background:rgba(255,255,255,.035);color:#94a3b8;text-align:left;cursor:pointer;transition:.18s ease}
+.media-choice:hover{transform:translateY(-1px);background:rgba(255,255,255,.065)}
+.media-choice.active{border-color:rgba(34,211,238,.32);background:linear-gradient(135deg,rgba(139,92,246,.17),rgba(8,145,178,.14));color:#f8fafc;box-shadow:0 7px 20px rgba(8,145,178,.08)}
+.media-choice-icon{width:27px;height:27px;flex:0 0 auto;display:grid;place-items:center;border-radius:9px;background:rgba(139,92,246,.13);color:#c4b5fd;font-size:11px;font-weight:900}.media-choice.active .media-choice-icon{background:linear-gradient(135deg,rgba(139,92,246,.44),rgba(8,145,178,.35));color:white}
+.media-choice strong{display:block;font-size:9px;line-height:1.2}.media-choice small{display:block;margin-top:2px;font-size:7px;color:#64748b;line-height:1.25}.media-choice.active small{color:#a8b4c6}
+.media-mode-hint{margin:8px 1px 0;color:#64748b;font-size:8px;line-height:1.4}
+.video-meta small{display:block;margin-top:1px;color:#94a3b8;font-size:6px;letter-spacing:.06em;font-weight:800}
+.round-action:disabled{opacity:.32;cursor:not-allowed;transform:none}.round-action.unavailable{color:#64748b;background:rgba(100,116,139,.07);border-color:rgba(100,116,139,.14)}
+@media(max-width:390px){.media-mode-choices{grid-template-columns:1fr}}

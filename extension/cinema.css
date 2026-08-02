@@ -69,3 +69,4 @@ button{font:inherit;color:inherit}
 .pip-root .pip-controls button.primary{background:linear-gradient(135deg,rgba(139,92,246,.32),rgba(8,145,178,.32));color:#e0f2fe}
 
 @media(max-width:420px){.view-copy span{display:none}.controls{grid-template-columns:34px 34px 1fr 1.25fr}.remote-grid{grid-template-columns:1fr}}
+.circle-btn.unavailable,.pip-controls button:disabled{opacity:.34;cursor:not-allowed;filter:none;transform:none}

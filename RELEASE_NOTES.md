@@ -1,33 +1,37 @@
-# APS Watch Together v1.2.0 — Flexible Camera Views
+# APS Watch Together v1.3.0 — Flexible Device Modes
 
-## Camera view controls
+## New participation modes
 
-- Adds a **Me** button to show or hide the local camera preview.
-- Adds a **Friends** button to show or hide all friend camera previews.
-- Allows four layouts: both visible, only Me, only Friends, or both hidden.
-- Hiding a preview does not turn the camera off and does not interrupt call audio.
-- Automatically displays friend video streams in Cinema Mode after they join.
-- Shows camera-off, muted, connecting and live states on friend tiles.
-- Supports up to four visible friend tiles in compact mode, with a +N indicator for larger rooms.
-- Remembers the user's Me/Friends visibility choices.
+- **Video + Audio:** full camera and microphone call.
+- **Audio only:** joins without requiring a camera.
+- **Video only:** joins without requiring a microphone.
+- **Watch only:** joins with no camera or microphone while playback sync, chat and reactions continue.
 
-## Floating call window
+## Missing-device resilience
 
-- Replaces the self-only floating view with an always-on-top **floating call** view.
-- The floating window can show Me, Friends, both or neither.
-- The same Me/Friends controls are available inside the floating window.
-- The floating window remains movable and resizable by the user.
-- Full controls, microphone and camera controls remain available.
+- Camera and microphone are requested independently.
+- A missing camera no longer blocks a working microphone.
+- A missing microphone no longer blocks a working camera.
+- If neither selected device exists, the participant automatically continues in Watch-only operation.
+- The permission page includes a clear **Continue in Watch only mode** option.
+- Device buttons are disabled and labelled when no corresponding device is active.
 
-## Retained reliability fixes
+## Receive-only calling
 
-- Retains the Netflix-safe player bridge that avoids direct DRM-video timestamp mutation.
-- Retains the macOS camera/microphone permission flow.
-- Retains Settings close buttons and safe full-panel ↔ Cinema Mode host handoff.
-- Render server configuration is unchanged.
+- Adds receive-only WebRTC audio/video transceivers when the participant sends no local track.
+- Watch-only participants can still see friends' cameras and hear friends' audio.
+- Audio-only and video-only participants can still receive both remote audio and video.
+- Cinema Mode and the floating call window preserve the selected participation mode.
 
-## External limitations
+## Retained features and fixes
 
-- Chrome chooses the initial floating-window position; the user can drag it afterward.
-- A TURN relay is recommended for restrictive corporate, hotel and carrier networks.
-- Netflix, Prime Video and ZEE5 can change their website players and may require future adapter updates.
+- Netflix-safe Play, Pause, Seek and Resync bridge.
+- Separate Me/Friends show-hide controls.
+- Movable always-on-top floating call window.
+- macOS full-tab permission flow.
+- Host handoff, room locking, chat and reactions.
+- Existing Render room server remains compatible; no redeployment is required for extension use.
+
+## Testing boundary
+
+Static validation and all six room-server integration tests pass. Physical no-camera/no-microphone laptops and live OTT accounts are still required for final real-device confirmation.
