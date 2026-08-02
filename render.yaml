@@ -2,6 +2,7 @@ services:
   - type: web
     name: aps-watch-together-server
     runtime: docker
+    plan: free
     dockerfilePath: ./server/Dockerfile
     dockerContext: ./server
     healthCheckPath: /health
