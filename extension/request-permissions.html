@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Allow camera and microphone — APS Watch Together</title>
+  <link rel="stylesheet" href="request-permissions.css">
+</head>
+<body>
+  <main class="card">
+    <div class="logo">▶</div>
+    <p class="eyebrow">APS WATCH TOGETHER</p>
+    <h1>Allow camera and microphone</h1>
+    <p class="intro">Chrome cannot show this permission prompt inside the side panel on some Macs. Grant it once in this full tab, then your private room will continue automatically.</p>
+    <div class="privacy">
+      <strong>Your privacy</strong>
+      <span>Your camera and microphone are used only for the peer-to-peer call. Movie video is never captured or sent through APS servers.</span>
+    </div>
+    <button id="allowBtn" type="button">Allow camera &amp; microphone</button>
+    <p id="status" class="status" role="status">After clicking, choose <strong>Allow</strong> in Chrome’s prompt.</p>
+    <details>
+      <summary>Permission still blocked?</summary>
+      <p>Open macOS System Settings → Privacy &amp; Security → Camera and Microphone, then enable Google Chrome. Fully quit and reopen Chrome afterward.</p>
+    </details>
+  </main>
+  <script src="request-permissions.js"></script>
+</body>
+</html>

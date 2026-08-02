@@ -4,10 +4,14 @@ A private Chrome extension for synchronized Netflix, Prime Video and ZEE5 playba
 
 > APS Watch Together does not stream, copy, record or retransmit movies. Every participant watches through their own account. The project is independent and is not affiliated with Netflix, Amazon or ZEE5.
 
-## Included in version 1.0.0
+## Included in version 1.2.0
 
 - Chrome Manifest V3 extension
 - Polished persistent side-panel interface
+- Cinema Mode that hides the full panel while the room continues
+- Movable compact camera view and always-on-top Document Picture-in-Picture
+- Independent **Me** and **Friends** show/hide controls in compact and floating modes
+- One-click return to full controls with safe host handoff
 - Host Play, Pause, clickable timeline, ±10 seconds and Resync controls
 - Continuous playback heartbeat and gentle drift correction
 - Active HTML5 player detection for Netflix, Prime Video and ZEE5
@@ -35,9 +39,10 @@ The following automated checks pass:
 3. Host transfer after an intentional leave
 4. Host ownership restoration after a short connection interruption
 5. Room lock and reopen enforcement
-6. JavaScript syntax validation
-7. Manifest, referenced-file, duplicate-ID and Manifest V3 inline-script validation
-8. Room-server health endpoint
+6. Full-panel to Cinema Mode host handoff
+7. JavaScript syntax validation
+8. Manifest, referenced-file, duplicate-ID and Manifest V3 inline-script validation
+9. Room-server health endpoint
 
 The current execution environment prevents loading unpacked Chrome extensions by administrator policy. Therefore Netflix, Prime Video and ZEE5 must still be tested on real Chrome installations while signed into those services. Streaming websites can change their internal players, so live adapter testing is mandatory before calling the release final.
 
@@ -93,6 +98,23 @@ The extension requests permanent access only to its supported streaming sites. A
 6. The host controls Play, Pause, Seek and Resync.
 
 A streaming site or Chrome may require each participant to click its video player once before the first remote Play command. Later commands should work after this activation.
+
+
+## Cinema Mode
+
+After a room is connected, click **Cinema** beside the microphone and camera controls. APS opens a compact companion, reconnects the same room, preserves host ownership and closes the full side panel.
+
+The compact companion can show your camera, your friends’ cameras, both, or neither. Hiding a preview does not turn that camera off, and call audio continues. You can:
+
+- use **Me** to show or hide your own preview;
+- use **Friends** to show or hide all friend previews;
+- drag the compact popup anywhere;
+- click **Float call** for an always-on-top movable call window;
+- use the same Me/Friends toggles in the floating window;
+- mute the microphone or turn your camera off;
+- click **Full controls** to restore the complete side panel.
+
+The always-on-top window uses Chrome's Document Picture-in-Picture API. Chrome does not let an extension choose an arbitrary screen coordinate, but the user can freely drag the window after it opens. Chrome 141 or newer is required.
 
 ## 4. Deploy for remote friends
 
@@ -159,4 +181,4 @@ START_HERE.html  Visual owner setup guide
 
 ## Browser scope
 
-Version 1.0 is Chrome-first on macOS and Windows. Safari packaging can follow after Chrome playback adapters are stable. Safari requires an Xcode wrapper and separate platform testing.
+Version 1.1 is Chrome-first on macOS and Windows. Safari packaging can follow after Chrome playback adapters are stable. Safari requires an Xcode wrapper and separate platform testing.

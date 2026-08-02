@@ -39,7 +39,11 @@ const app = {
   intentionallyLeft: false,
   pendingJoin: null,
   lastRoomActivity: Date.now(),
-  activeTabId: null
+  activeTabId: null,
+  permissionTabOpen: false,
+  handoffToCinema: false,
+  cinemaStarting: false,
+  restoreInProgress: false
 };
 
 const elements = {
@@ -51,14 +55,14 @@ const elements = {
   rewindBtn: $('#rewindBtn'), playPauseBtn: $('#playPauseBtn'), playPauseIcon: $('#playPauseIcon'), forwardBtn: $('#forwardBtn'),
   resyncBtn: $('#resyncBtn'), playerMessage: $('#playerMessage'), participantCount: $('#participantCount'), peopleCountPill: $('#peopleCountPill'),
   videoGrid: $('#videoGrid'), localVideoCard: $('#localVideoCard'), localVideo: $('#localVideo'), localFallback: $('#localFallback'), localInitial: $('#localInitial'),
-  toggleMicBtn: $('#toggleMicBtn'), toggleCameraBtn: $('#toggleCameraBtn'), localMicState: $('#localMicState'), peopleTabBtn: $('#peopleTabBtn'),
+  cinemaModeBtn: $('#cinemaModeBtn'), toggleMicBtn: $('#toggleMicBtn'), toggleCameraBtn: $('#toggleCameraBtn'), localMicState: $('#localMicState'), peopleTabBtn: $('#peopleTabBtn'),
   chatTabBtn: $('#chatTabBtn'), peoplePanel: $('#peoplePanel'), chatPanel: $('#chatPanel'), peopleList: $('#peopleList'), unreadPill: $('#unreadPill'),
   sharedControlsToggle: $('#sharedControlsToggle'), roomLockToggle: $('#roomLockToggle'), chatForm: $('#chatForm'), chatInput: $('#chatInput'), messages: $('#messages'),
   toastRegion: $('#toastRegion'), reactionLayer: $('#reactionLayer')
 };
 
 async function init() {
-  const stored = await chrome.storage.local.get(['apsSettings', 'apsProfile']);
+  const stored = await chrome.storage.local.get(['apsSettings', 'apsProfile', 'apsActiveRoom', 'apsRestoreRoom']);
   app.settings = stored.apsSettings || {};
   app.profile = stored.apsProfile || { displayName: '', avatarSeed: crypto.randomUUID() };
   elements.displayName.value = app.profile.displayName || '';
@@ -69,6 +73,27 @@ async function init() {
   updateConnectionUI();
   await pollPlayer(true);
   app.statusPollTimer = setInterval(() => pollPlayer(false), 1400);
+
+  const restore = stored.apsRestoreRoom;
+  const active = stored.apsActiveRoom;
+  const validRestore = restore?.roomCode && restore.expiresAt > Date.now() && active?.roomCode === restore.roomCode;
+  if (validRestore) {
+    app.restoreInProgress = true;
+    app.pendingJoin = { mode: 'join', roomCode: restore.roomCode };
+    app.intentionallyLeft = false;
+    setBusy(true, 'Restoring…');
+    try {
+      await ensureLocalMedia();
+      connectSocket();
+    } catch (error) {
+      if (isMediaPermissionError(error)) await openMediaPermissionTab();
+      else {
+        app.restoreInProgress = false;
+        setBusy(false);
+        toast(describeMediaError(error), 'error');
+      }
+    }
+  }
 }
 
 function bindEvents() {
@@ -92,6 +117,7 @@ function bindEvents() {
   elements.resyncBtn.addEventListener('click', forceResync);
   elements.timeline.addEventListener('click', seekFromTimeline);
   elements.timeline.addEventListener('keydown', seekTimelineWithKeyboard);
+  elements.cinemaModeBtn.addEventListener('click', startCinemaMode);
   elements.toggleMicBtn.addEventListener('click', toggleMicrophone);
   elements.toggleCameraBtn.addEventListener('click', toggleCamera);
   elements.peopleTabBtn.addEventListener('click', () => setTab('people'));
@@ -102,6 +128,21 @@ function bindEvents() {
   $$('.reaction-row button').forEach((button) => button.addEventListener('click', () => sendReaction(button.dataset.reaction)));
 
   chrome.runtime.onMessage.addListener((message, sender) => {
+    if (message?.type === 'APS_MEDIA_PERMISSION_GRANTED') {
+      app.permissionTabOpen = false;
+      resumeRoomFlowAfterPermission();
+      return;
+    }
+    if (message?.type === 'APS_MEDIA_PERMISSION_DENIED') {
+      app.permissionTabOpen = false;
+      setBusy(false);
+      toast(message.error || 'Camera and microphone permission was not granted.', 'error');
+      return;
+    }
+    if (message?.type === 'APS_CINEMA_READY' && app.cinemaStarting && message.roomCode === app.roomCode) {
+      completeCinemaHandoff();
+      return;
+    }
     if (sender?.tab?.id && app.activeTabId && sender.tab.id !== app.activeTabId) return;
     if (sender?.tab?.id) app.activeTabId = sender.tab.id;
     if (message?.type === 'APS_PLAYER_STATUS') handlePlayerStatus(message);
@@ -110,7 +151,7 @@ function bindEvents() {
   });
 
   window.addEventListener('beforeunload', () => {
-    if (app.socket?.readyState === WebSocket.OPEN) sendSocket({ type: 'leave-room' });
+    if (!app.handoffToCinema && app.socket?.readyState === WebSocket.OPEN) sendSocket({ type: 'leave-room' });
     stopLocalMedia();
   });
 }
@@ -144,8 +185,52 @@ async function beginRoomFlow(mode) {
     await ensureLocalMedia();
     connectSocket();
   } catch (error) {
+    if (isMediaPermissionError(error)) {
+      await openMediaPermissionTab();
+      return;
+    }
     setBusy(false);
-    toast(error?.message || 'Camera and microphone permission is required.', 'error');
+    toast(describeMediaError(error), 'error');
+  }
+}
+
+function isMediaPermissionError(error) {
+  return ['NotAllowedError', 'PermissionDeniedError', 'SecurityError'].includes(error?.name)
+    || /permission|not allowed|dismissed|denied/i.test(String(error?.message || ''));
+}
+
+function describeMediaError(error) {
+  if (error?.name === 'NotFoundError') return 'No camera or microphone was found. Connect a device and try again.';
+  if (error?.name === 'NotReadableError') return 'Your camera or microphone is being used by another app. Close FaceTime, Zoom or Teams and try again.';
+  if (error?.name === 'OverconstrainedError') return 'The selected camera quality is unavailable. Choose 720p in Settings and try again.';
+  return error?.message || 'Camera and microphone could not be started.';
+}
+
+async function openMediaPermissionTab() {
+  setBusy(false);
+  if (app.permissionTabOpen) {
+    toast('Complete the camera and microphone permission tab, then return here.', 'error');
+    return;
+  }
+  app.permissionTabOpen = true;
+  try {
+    await chrome.tabs.create({ url: chrome.runtime.getURL('request-permissions.html'), active: true });
+    toast('A permission tab opened. Click Allow camera & microphone.', 'success');
+  } catch (error) {
+    app.permissionTabOpen = false;
+    toast(error?.message || 'Could not open the permission page.', 'error');
+  }
+}
+
+async function resumeRoomFlowAfterPermission() {
+  if (!app.pendingJoin) return;
+  setBusy(true, app.pendingJoin.mode === 'create' ? 'Creating…' : 'Joining…');
+  try {
+    await ensureLocalMedia();
+    connectSocket();
+  } catch (error) {
+    setBusy(false);
+    toast(describeMediaError(error), 'error');
   }
 }
 
@@ -311,6 +396,19 @@ function enterRoom(message) {
   updateParticipantUI();
   startHeartbeat();
   toast(message.type === 'room-created' ? 'Private room created.' : 'Joined the watch room.', 'success');
+  chrome.storage.local.set({
+    apsActiveRoom: {
+      roomCode: app.roomCode,
+      displayName: app.profile.displayName,
+      updatedAt: Date.now(),
+      expiresAt: Date.now() + 8 * 60 * 60 * 1000
+    }
+  });
+  if (app.restoreInProgress) {
+    app.restoreInProgress = false;
+    chrome.storage.local.remove('apsRestoreRoom');
+    chrome.runtime.sendMessage({ type: 'APS_PANEL_RESTORED', roomCode: app.roomCode }).catch(() => undefined);
+  }
 
   for (const participant of app.participants.values()) {
     if (participant.id !== app.selfId) createPeerOffer(participant.id);
@@ -841,6 +939,53 @@ function setTab(tab) {
   }
 }
 
+async function startCinemaMode() {
+  if (!app.roomCode || app.cinemaStarting) return;
+  app.cinemaStarting = true;
+  elements.cinemaModeBtn.disabled = true;
+  elements.cinemaModeBtn.querySelector('span').textContent = 'Opening…';
+  await chrome.storage.local.set({
+    apsActiveRoom: {
+      roomCode: app.roomCode,
+      displayName: app.profile.displayName,
+      updatedAt: Date.now(),
+      expiresAt: Date.now() + 8 * 60 * 60 * 1000
+    }
+  });
+  const response = await chrome.runtime.sendMessage({ type: 'APS_OPEN_CINEMA', roomCode: app.roomCode });
+  if (!response?.ok) {
+    app.cinemaStarting = false;
+    elements.cinemaModeBtn.disabled = false;
+    elements.cinemaModeBtn.querySelector('span').textContent = 'Cinema';
+    toast(response?.error || 'Could not open Cinema Mode.', 'error');
+    return;
+  }
+  toast('Cinema Mode is opening. The full panel will hide automatically.', 'success');
+  setTimeout(() => {
+    if (!app.cinemaStarting) return;
+    app.cinemaStarting = false;
+    elements.cinemaModeBtn.disabled = false;
+    elements.cinemaModeBtn.querySelector('span').textContent = 'Cinema';
+    toast('Cinema Mode took too long. Try again.', 'error');
+  }, 15000);
+}
+
+async function completeCinemaHandoff() {
+  if (!app.cinemaStarting) return;
+  app.cinemaStarting = false;
+  app.handoffToCinema = true;
+  app.intentionallyLeft = true;
+  elements.cinemaModeBtn.disabled = true;
+  for (const pc of app.peerConnections.values()) pc.close();
+  app.peerConnections.clear();
+  stopLocalMedia();
+  if (app.socket) app.socket.close();
+  const response = await chrome.runtime.sendMessage({ type: 'APS_CLOSE_SIDE_PANEL', tabId: app.activeTabId });
+  if (!response?.ok) {
+    toast('Cinema Mode is ready. Close the side panel with the × button.', 'success');
+  }
+}
+
 async function copyInvite() {
   const code = formatRoomCode(app.roomCode);
   try {
@@ -865,6 +1010,7 @@ function leaveRoom() {
   app.peerConnections.clear();
   app.remoteStreams.clear();
   document.querySelectorAll('[data-peer-card]').forEach((node) => node.remove());
+  chrome.storage.local.remove(['apsActiveRoom', 'apsRestoreRoom']);
   setView('setup');
   updateConnectionUI();
 }

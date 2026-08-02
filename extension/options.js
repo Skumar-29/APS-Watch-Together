@@ -60,6 +60,20 @@ async function reset() {
   show('Defaults restored.');
 }
 
+async function closeSettings() {
+  try {
+    const tab = await chrome.tabs.getCurrent();
+    if (tab?.id) {
+      await chrome.tabs.remove(tab.id);
+      return;
+    }
+  } catch {
+    // Fall back to the normal browser close behaviour below.
+  }
+  window.close();
+  setTimeout(() => show('Close this tab with ⌘W on Mac or Ctrl+W on Windows.', true), 250);
+}
+
 function serverPermissionPattern(serverUrl) {
   try {
     const parsed = new URL(serverUrl.replace(/^wss:/i, 'https:').replace(/^ws:/i, 'http:'));
@@ -78,4 +92,6 @@ function show(message, error = false) {
 
 document.getElementById('saveBtn').addEventListener('click', save);
 document.getElementById('resetBtn').addEventListener('click', reset);
+document.getElementById('closeBtn').addEventListener('click', closeSettings);
+document.getElementById('closeBottomBtn').addEventListener('click', closeSettings);
 load();

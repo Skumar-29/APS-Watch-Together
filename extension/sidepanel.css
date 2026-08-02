@@ -219,3 +219,23 @@ main { padding: 14px; }
   .hero-card { padding: 21px 17px; }
   .video-grid { grid-template-columns: 1fr; }
 }
+
+.cinema-mode-btn {
+  height: 34px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgba(34, 211, 238, .25);
+  border-radius: 12px;
+  color: #cffafe;
+  background: linear-gradient(135deg, rgba(139,92,246,.16), rgba(8,145,178,.16));
+  font-size: 9px;
+  font-weight: 850;
+  cursor: pointer;
+  transition: .2s ease;
+}
+.cinema-mode-btn svg { width: 15px; height: 15px; fill: currentColor; }
+.cinema-mode-btn:hover { transform: translateY(-1px); background: linear-gradient(135deg, rgba(139,92,246,.26), rgba(8,145,178,.24)); }
+.cinema-mode-btn:disabled { opacity: .5; cursor: wait; transform: none; }
+@media (max-width: 370px) { .cinema-mode-btn span { display: none; } .cinema-mode-btn { width: 34px; padding: 0; justify-content: center; } }

@@ -1,27 +1,53 @@
-APS WATCH TOGETHER 1.0.0 — VERIFICATION REPORT
-Date: 2 August 2026
+APS Watch Together v1.2.0 — Verification Report
+Generated: 2026-08-02
 
-PASSED
-- All JavaScript syntax checks
-- Manifest and package JSON parsing
-- Manifest file-reference validation
-- HTML duplicate-ID validation
-- Manifest V3 inline-script validation
-- Control-character scan
-- Room create/join/playback relay integration test
-- Host-only/shared-control integration test
-- Intentional host-transfer integration test
-- Host reconnect reservation integration test
-- Room lock/reopen integration test
-- Health endpoint test
-- Friend release-package builder and ZIP integrity test
+Release scope
+-------------
+- Netflix-safe player bridge from v1.0.3
+- macOS camera/microphone permission flow
+- Settings close controls
+- Full-panel to Cinema Mode handoff
+- Local and remote camera rendering in Cinema Mode
+- Independent Me and Friends show/hide controls
+- Four layouts: both visible, Me only, Friends only, both hidden
+- Always-on-top floating call with the same visibility controls
+- Render Free plan retained in render.yaml
 
-NOT EXECUTED IN THIS CONTAINER
-- Loading the unpacked extension in Chrome (blocked by administrator policy)
-- Signed-in Netflix playback
-- Signed-in Prime Video playback
-- Signed-in ZEE5 playback
-- Two-laptop WebRTC camera/microphone test
-- Cross-network TURN relay test
+Automated checks passed
+-----------------------
+1. JavaScript syntax checks for all extension, server, test and build files.
+2. Manifest V3 JSON parse and required version 1.2.0 validation.
+3. HTML local-reference validation.
+4. Duplicate HTML ID validation.
+5. Inline script and event-handler validation.
+6. No eval() usage detected.
+7. Cinema UI source checks for Me/Friends controls, remote grid and saved preferences.
+8. Friend release package built with version 1.2.0.
+9. Friend release package contains the configured production server:
+   wss://aps-watch-together-server.onrender.com/ws
+10. Six signalling-server integration tests passed:
+    - room creation, friend join and playback relay
+    - host-only and shared playback permissions
+    - host transfer after intentional leave
+    - host recovery after short disconnection
+    - room lock and reopen
+    - full-panel to Cinema Mode host handoff without guest takeover
 
-These live tests are required before the build should be described as a final stable release.
+Live testing still required
+---------------------------
+The controlled environment blocks browser navigation and unpacked-extension loading by
+administrator policy. It also cannot sign in to the user's Netflix, Prime Video or ZEE5
+accounts or connect two physical cameras/laptops. The first real two-laptop test remains
+the decisive confirmation for remote video rendering, macOS window placement and OTT
+player behaviour.
+
+Expected Cinema Mode workflow
+-----------------------------
+1. Join or create a room in the full side panel.
+2. Click Cinema.
+3. Cinema Mode joins the same room and preserves host ownership.
+4. The full side panel closes automatically.
+5. Friend camera streams appear in the compact window.
+6. Use Me and Friends independently to hide or show either camera group.
+7. Click Float call for an always-on-top movable view with the same toggles.
+8. Click Full controls to restore the side panel safely.

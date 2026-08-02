@@ -9,8 +9,11 @@
 <body>
   <main class="settings-shell">
     <header>
-      <div class="logo">▶</div>
-      <div><h1>APS Watch Together</h1><p>Connection and call quality settings</p></div>
+      <div class="brand-row">
+        <div class="logo">▶</div>
+        <div><h1>APS Watch Together</h1><p>Connection and call quality settings</p></div>
+      </div>
+      <button id="closeBtn" class="icon-button" type="button" aria-label="Close settings" title="Close settings">×</button>
     </header>
 
     <section class="card">
@@ -38,7 +41,11 @@
       <p class="hint">These credentials remain in Chrome's local extension storage on this computer.</p>
     </section>
 
-    <div class="actions"><button id="resetBtn" class="secondary">Reset defaults</button><button id="saveBtn" class="primary">Save settings</button></div>
+    <div class="actions">
+      <button id="resetBtn" class="secondary" type="button">Reset defaults</button>
+      <button id="closeBottomBtn" class="secondary" type="button">Close</button>
+      <button id="saveBtn" class="primary" type="button">Save settings</button>
+    </div>
     <div id="status" class="status"></div>
   </main>
   <script type="module" src="options.js"></script>

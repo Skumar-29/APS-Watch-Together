@@ -207,3 +207,37 @@ test('host can lock and reopen a room', async () => {
   guest.close();
   outsider.close();
 });
+
+test('hands host control from full panel to Cinema Mode without transferring to a guest', async () => {
+  const sessionId = 'cinema-handoff-host-session-123456';
+  const hostPanel = await connect('Cinema Host', sessionId);
+  const guest = await connect('Cinema Guest', 'cinema-handoff-guest-session-123456');
+
+  const createdPromise = waitForMessage(hostPanel, 'room-created');
+  hostPanel.send(JSON.stringify({ type: 'create-room' }));
+  const created = await createdPromise;
+
+  const guestJoinedPromise = waitForMessage(guest, 'room-joined');
+  guest.send(JSON.stringify({ type: 'join-room', roomCode: created.roomCode }));
+  await guestJoinedPromise;
+
+  const cinema = await connect('Cinema Host', sessionId);
+  const cinemaJoinedPromise = waitForMessage(cinema, 'room-joined');
+  cinema.send(JSON.stringify({ type: 'join-room', roomCode: created.roomCode }));
+  const cinemaJoined = await cinemaJoinedPromise;
+  assert.equal(cinemaJoined.hostId, cinemaJoined.selfId);
+
+  hostPanel.close();
+
+  const playbackPromise = waitForMessage(guest, 'playback');
+  cinema.send(JSON.stringify({
+    type: 'playback',
+    command: { kind: 'pause', time: 88, paused: true, rate: 1, sentAt: Date.now() }
+  }));
+  const playback = await playbackPromise;
+  assert.equal(playback.command.kind, 'pause');
+  assert.equal(playback.command.time, 88);
+
+  cinema.close();
+  guest.close();
+});

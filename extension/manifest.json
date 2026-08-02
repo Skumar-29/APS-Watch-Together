@@ -2,12 +2,13 @@
   "manifest_version": 3,
   "name": "APS Watch Together",
   "short_name": "APS Watch",
-  "version": "1.0.0",
-  "description": "Private synchronized watch rooms with HD video calling for Netflix, Prime Video and ZEE5.",
-  "minimum_chrome_version": "116",
+  "version": "1.2.0",
+  "description": "Private synchronized watch rooms with HD video calling, Cinema Mode and hideable self/friend views.",
+  "minimum_chrome_version": "141",
   "permissions": [
     "storage",
-    "sidePanel"
+    "sidePanel",
+    "windows"
   ],
   "host_permissions": [
     "https://*.netflix.com/*",
@@ -41,6 +42,16 @@
     "default_path": "sidepanel.html"
   },
   "content_scripts": [
+    {
+      "matches": [
+        "https://*.netflix.com/*"
+      ],
+      "js": [
+        "netflix-bridge.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
     {
       "matches": [
         "https://*.netflix.com/*",

@@ -10,7 +10,11 @@
     service: detectService(),
     attachedAt: 0,
     softCorrectionTimer: null,
-    enabled: true
+    enabled: true,
+    netflixBridgeStatus: null,
+    netflixBridgeStatusAt: 0,
+    netflixBridgePending: new Map(),
+    netflixBridgePollBusy: false
   };
 
   const SERVICE_LABELS = {
@@ -86,7 +90,76 @@
     return cleanTitle(document.title) || SERVICE_LABELS[state.service];
   }
 
+  function callNetflixBridge(command, timeoutMs = 2500) {
+    return new Promise((resolve) => {
+      const requestId = crypto.randomUUID();
+      const timeout = setTimeout(() => {
+        state.netflixBridgePending.delete(requestId);
+        resolve({ ok: false, error: 'Netflix player control timed out. Refresh the Netflix tab and try again.' });
+      }, timeoutMs);
+      state.netflixBridgePending.set(requestId, { resolve, timeout });
+      window.postMessage({
+        source: 'APS_WATCH_TOGETHER',
+        type: 'APS_NETFLIX_COMMAND',
+        requestId,
+        command
+      }, location.origin);
+    });
+  }
+
+  window.addEventListener('message', (event) => {
+    if (event.source !== window || event.origin !== location.origin) return;
+    const data = event.data;
+    if (!data || data.source !== 'APS_NETFLIX_BRIDGE' || data.type !== 'APS_NETFLIX_RESULT') return;
+    const pending = state.netflixBridgePending.get(data.requestId);
+    if (!pending) return;
+    clearTimeout(pending.timeout);
+    state.netflixBridgePending.delete(data.requestId);
+    if (data.result?.status) {
+      state.netflixBridgeStatus = data.result.status;
+      state.netflixBridgeStatusAt = Date.now();
+    }
+    pending.resolve(data.result || { ok: false, error: 'Netflix player returned no result.' });
+  });
+
+  function bridgeSnapshot(reason, bridgeStatus) {
+    return {
+      type: 'APS_PLAYER_STATUS',
+      reason,
+      service: state.service,
+      serviceLabel: SERVICE_LABELS[state.service],
+      ready: bridgeStatus?.ready !== false,
+      paused: Boolean(bridgeStatus?.paused),
+      currentTime: Number(bridgeStatus?.currentTime || 0),
+      duration: Number(bridgeStatus?.duration || 0),
+      playbackRate: Number(bridgeStatus?.playbackRate || 1),
+      muted: state.video?.muted || false,
+      volume: Number.isFinite(state.video?.volume) ? state.video.volume : 1,
+      title: getTitle(),
+      url: location.href,
+      wallClock: Date.now()
+    };
+  }
+
+  async function refreshNetflixBridgeStatus() {
+    if (state.service !== 'netflix' || state.netflixBridgePollBusy) return;
+    state.netflixBridgePollBusy = true;
+    try {
+      const result = await callNetflixBridge({ kind: 'status' }, 1200);
+      if (result?.ok && result.status) {
+        state.netflixBridgeStatus = result.status;
+        state.netflixBridgeStatusAt = Date.now();
+        chrome.runtime.sendMessage(bridgeSnapshot('netflix-heartbeat', result.status)).catch(() => undefined);
+      }
+    } finally {
+      state.netflixBridgePollBusy = false;
+    }
+  }
+
   function snapshot(reason = 'status') {
+    if (state.service === 'netflix' && state.netflixBridgeStatus && Date.now() - state.netflixBridgeStatusAt < 2500) {
+      return bridgeSnapshot(reason, state.netflixBridgeStatus);
+    }
     const video = state.video;
     if (!video) {
       return {
@@ -187,6 +260,18 @@
     markRemote(kind === 'sync' ? 1400 : 900);
 
     try {
+      if (state.service === 'netflix') {
+        const result = await callNetflixBridge(command, kind === 'sync' ? 3200 : 2500);
+        if (!result?.ok) throw new Error(result?.error || 'Netflix player control failed.');
+        if (result.status) {
+          state.netflixBridgeStatus = result.status;
+          state.netflixBridgeStatusAt = Date.now();
+        }
+        const status = result.status ? bridgeSnapshot(`applied-${kind}`, result.status) : snapshot(`applied-${kind}`);
+        chrome.runtime.sendMessage(status).catch(() => undefined);
+        return { ok: true, status };
+      }
+
       if (kind === 'play') {
         if (Number.isFinite(command.time)) video.currentTime = command.time;
         await video.play();
@@ -293,7 +378,8 @@
   setInterval(() => {
     const best = findBestVideo();
     if (best && best !== state.video) attach(best);
-    if (state.video) sendStatus('heartbeat');
+    if (state.service === 'netflix') refreshNetflixBridgeStatus();
+    else if (state.video) sendStatus('heartbeat');
   }, 1000);
 
   const initial = findBestVideo();

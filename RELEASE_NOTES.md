@@ -1,32 +1,33 @@
-# APS Watch Together 1.0.0 — Engineering Preview
+# APS Watch Together v1.2.0 — Flexible Camera Views
 
-## Ready
+## Camera view controls
 
-- Professional Chrome side-panel user interface
-- Netflix, Prime Video and ZEE5 player bridge
-- Real host playback commands
-- Absolute seeking and continuous synchronization
-- Soft speed correction for small timing drift
-- HD peer-to-peer calling, chat and reactions
-- Private ephemeral rooms
-- Host recovery, host transfer and room locking
-- Deployment and friend packaging workflow
-- Automated signalling-server test suite
+- Adds a **Me** button to show or hide the local camera preview.
+- Adds a **Friends** button to show or hide all friend camera previews.
+- Allows four layouts: both visible, only Me, only Friends, or both hidden.
+- Hiding a preview does not turn the camera off and does not interrupt call audio.
+- Automatically displays friend video streams in Cinema Mode after they join.
+- Shows camera-off, muted, connecting and live states on friend tiles.
+- Supports up to four visible friend tiles in compact mode, with a +N indicator for larger rooms.
+- Remembers the user's Me/Friends visibility choices.
 
-## Must be completed before friends rely on it
+## Floating call window
 
-1. Deploy the room server and insert its `wss://` address.
-2. Test Netflix playback using two real Chrome profiles/laptops.
-3. Test Prime Video playback using two real Chrome profiles/laptops.
-4. Test ZEE5 playback using two real Chrome profiles/laptops.
-5. Verify camera/microphone permissions on both macOS and Windows.
-6. Add TURN credentials and test from two different internet connections.
-7. Fix any streaming-site adapter differences found during live tests.
-8. Only then create and send the friend ZIP.
+- Replaces the self-only floating view with an always-on-top **floating call** view.
+- The floating window can show Me, Friends, both or neither.
+- The same Me/Friends controls are available inside the floating window.
+- The floating window remains movable and resizable by the user.
+- Full controls, microphone and camera controls remain available.
 
-## Known external limitations
+## Retained reliability fixes
 
-- Each friend needs their own legitimate access to the streaming service.
-- Streaming websites may change their internal HTML player implementation.
-- Browser autoplay rules can require one initial click in the player.
-- Unpacked Chrome installation cannot be reduced to a silent one-click installer; Chrome Web Store publication is the later solution.
+- Retains the Netflix-safe player bridge that avoids direct DRM-video timestamp mutation.
+- Retains the macOS camera/microphone permission flow.
+- Retains Settings close buttons and safe full-panel ↔ Cinema Mode host handoff.
+- Render server configuration is unchanged.
+
+## External limitations
+
+- Chrome chooses the initial floating-window position; the user can drag it afterward.
+- A TURN relay is recommended for restrictive corporate, hotel and carrier networks.
+- Netflix, Prime Video and ZEE5 can change their website players and may require future adapter updates.
