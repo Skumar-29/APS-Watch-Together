@@ -1,0 +1,19 @@
+APS WATCH TOGETHER — FRIEND INSTALLATION
+
+1. Save the supplied APS-Watch-Together-Extension.zip file to Documents.
+2. Double-click the ZIP to extract it.
+3. Open Google Chrome.
+4. Type chrome://extensions in the address bar and press Enter.
+5. Turn on Developer mode in the top-right corner.
+6. Click Load unpacked.
+7. Select the extracted APS-Watch-Together-Extension folder.
+8. Click Chrome's puzzle-piece Extensions icon and pin APS Watch Together.
+9. Open Netflix, Prime Video or ZEE5 in Chrome.
+10. Click APS Watch Together, enter your name and join the room code your host sends.
+11. Allow camera and microphone access.
+12. Open the same movie/episode. Click Play once if Chrome asks for player interaction.
+
+Important:
+- Keep the extracted folder. Do not delete or move it while the extension is installed.
+- Use your own streaming-service account.
+- The movie is never sent through APS; only playback commands are synchronized.

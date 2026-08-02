@@ -1,0 +1,27 @@
+APS WATCH TOGETHER 1.0.0 — VERIFICATION REPORT
+Date: 2 August 2026
+
+PASSED
+- All JavaScript syntax checks
+- Manifest and package JSON parsing
+- Manifest file-reference validation
+- HTML duplicate-ID validation
+- Manifest V3 inline-script validation
+- Control-character scan
+- Room create/join/playback relay integration test
+- Host-only/shared-control integration test
+- Intentional host-transfer integration test
+- Host reconnect reservation integration test
+- Room lock/reopen integration test
+- Health endpoint test
+- Friend release-package builder and ZIP integrity test
+
+NOT EXECUTED IN THIS CONTAINER
+- Loading the unpacked extension in Chrome (blocked by administrator policy)
+- Signed-in Netflix playback
+- Signed-in Prime Video playback
+- Signed-in ZEE5 playback
+- Two-laptop WebRTC camera/microphone test
+- Cross-network TURN relay test
+
+These live tests are required before the build should be described as a final stable release.

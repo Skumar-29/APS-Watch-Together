@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: aps-watch-together-server
+    runtime: docker
+    dockerfilePath: ./server/Dockerfile
+    dockerContext: ./server
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: MAX_ROOM_SIZE
+        value: 8
+      - key: ROOM_TTL_HOURS
+        value: 8
