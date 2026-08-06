@@ -1,8 +1,8 @@
 {
   "name": "aps-watch-together-server",
-  "version": "1.0.0",
+  "version": "1.5.1",
   "private": true,
-  "description": "Zero-dependency ephemeral WebSocket signalling and synchronization server for APS Watch Together.",
+  "description": "Zero-dependency room, signalling, playback synchronization, direct invite and screen-presenter service for APS Watch Together.",
   "type": "module",
   "main": "server.js",
   "scripts": {

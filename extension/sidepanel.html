@@ -41,30 +41,29 @@
           </div>
         </div>
 
+        <div id="inviteReadyBanner" class="invite-ready-banner" hidden>
+          <span class="invite-ready-icon">↗</span>
+          <div><strong>Room invitation ready</strong><small>Enter your name and join <b id="inviteReadyCode">—</b></small></div>
+        </div>
+
         <div class="form-card">
           <label class="field-label" for="displayName">Your name</label>
           <input id="displayName" class="text-input" maxlength="32" autocomplete="name" placeholder="e.g. Sandeep">
 
-          <div class="media-mode-block">
-            <div class="media-mode-heading">
-              <span class="field-label">Join call as</span>
-              <span id="mediaModeStatus" class="media-mode-status">Camera + microphone</span>
+          <div class="quick-media-card">
+            <div class="quick-media-heading">
+              <span class="field-label">Call devices</span>
+              <span id="mediaModeStatus" class="media-mode-status">Camera and microphone on</span>
             </div>
-            <div id="mediaModeChoices" class="media-mode-choices" role="radiogroup" aria-label="Choose camera and microphone mode">
-              <button class="media-choice active" type="button" role="radio" aria-checked="true" data-media-mode="av">
-                <span class="media-choice-icon">◉</span><span><strong>Video + audio</strong><small>Full call experience</small></span>
+            <div id="mediaModeChoices" class="quick-media-actions" aria-label="Choose devices for joining">
+              <button id="preJoinCameraBtn" class="quick-device active" type="button" data-media-kind="video" aria-pressed="true">
+                <span class="quick-device-icon">▣</span><span><strong>Camera</strong><small id="preJoinCameraStatus">On · automatic</small></span><i></i>
               </button>
-              <button class="media-choice" type="button" role="radio" aria-checked="false" data-media-mode="audio">
-                <span class="media-choice-icon">♪</span><span><strong>Audio only</strong><small>No camera needed</small></span>
-              </button>
-              <button class="media-choice" type="button" role="radio" aria-checked="false" data-media-mode="video">
-                <span class="media-choice-icon">▣</span><span><strong>Video only</strong><small>No microphone needed</small></span>
-              </button>
-              <button class="media-choice" type="button" role="radio" aria-checked="false" data-media-mode="watch">
-                <span class="media-choice-icon">▶</span><span><strong>Watch only</strong><small>No camera or microphone</small></span>
+              <button id="preJoinMicBtn" class="quick-device active" type="button" data-media-kind="audio" aria-pressed="true">
+                <span class="quick-device-icon">♪</span><span><strong>Microphone</strong><small id="preJoinMicStatus">On · automatic</small></span><i></i>
               </button>
             </div>
-            <p id="mediaModeHint" class="media-mode-hint">APS will automatically continue with any available device if one is missing.</p>
+            <p id="mediaModeHint" class="media-mode-hint">Turn either one off now, or change devices at any time after joining.</p>
           </div>
 
           <button id="createRoomBtn" class="primary-btn" type="button">
@@ -93,6 +92,9 @@
             <button id="copyRoomCodeBtn" class="room-code" type="button"><span id="roomCodeText">—</span><svg viewBox="0 0 24 24"><path d="M8 8V5a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-3v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2h3Zm2 0h4a2 2 0 0 1 2 2v4h3V5h-9v3Z"/></svg></button>
           </div>
           <div class="room-strip-actions">
+            <button id="shareInviteBtn" class="share-invite-btn" type="button" title="Share a direct room link">
+              <svg viewBox="0 0 24 24"><path d="M18 8a3 3 0 1 0-2.8-4H15a3 3 0 0 0 .5 1.7L8.9 9A3 3 0 0 0 7 8.3a3 3 0 1 0 1.9 5.3l6.6 3.3A3 3 0 1 0 17 14.3a3 3 0 0 0-1.5.4l-6.6-3.3v-.8l6.6-3.3A3 3 0 0 0 18 8Z"/></svg><span>Invite</span>
+            </button>
             <span id="roleBadge" class="badge host">HOST</span>
             <button id="leaveRoomBtn" class="danger-ghost" type="button">Leave</button>
           </div>
@@ -118,18 +120,42 @@
           <div class="player-message" id="playerMessage">Open a movie in this tab to activate synchronized controls.</div>
         </div>
 
-        <div class="section-heading">
-          <div><h3>Video call</h3><span id="participantCount">1 participant</span></div>
-          <div class="call-actions">
-            <button id="cinemaModeBtn" class="cinema-mode-btn" type="button" title="Cinema Mode: hide full panel and keep a movable self-view">
-              <svg viewBox="0 0 24 24"><path d="M3 5h18v12H3V5Zm2 2v8h14V7H5Zm3 11h8v2H8v-2Z"/></svg><span>Cinema</span>
-            </button>
-            <button id="toggleMicBtn" class="round-action active" type="button" aria-label="Mute microphone"><svg viewBox="0 0 24 24"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.9V22h2v-3.1A7 7 0 0 0 19 12h-2Z"/></svg></button>
-            <button id="toggleCameraBtn" class="round-action active" type="button" aria-label="Turn camera off"><svg viewBox="0 0 24 24"><path d="M4 5h11a2 2 0 0 1 2 2v2.2l4-2.5v10.6l-4-2.5V17a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/></svg></button>
-          </div>
+        <div class="section-heading meeting-heading">
+          <div><h3>Call & collaboration</h3><span id="participantCount">1 participant</span></div>
+        </div>
+        <div class="meeting-toolbar" aria-label="Call controls">
+          <button id="toggleMicBtn" class="meeting-action active" type="button" aria-label="Mute microphone"><svg viewBox="0 0 24 24"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.9V22h2v-3.1A7 7 0 0 0 19 12h-2Z"/></svg><span>Mic</span><i class="action-badge">+</i></button>
+          <button id="toggleCameraBtn" class="meeting-action active" type="button" aria-label="Turn camera off"><svg viewBox="0 0 24 24"><path d="M4 5h11a2 2 0 0 1 2 2v2.2l4-2.5v10.6l-4-2.5V17a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/></svg><span>Camera</span><i class="action-badge">+</i></button>
+          <button id="screenShareBtn" class="meeting-action share-action" type="button" aria-label="Share screen"><svg viewBox="0 0 24 24"><path d="M3 4h18v13H3V4Zm2 2v9h14V6H5Zm6 12h2v2h4v2H7v-2h4v-2Zm1-10 4 4h-3v2h-2v-2H8l4-4Z"/></svg><span>Share</span></button>
+          <button id="callSettingsBtn" class="meeting-action" type="button" aria-label="Call device settings" title="Call device settings"><svg viewBox="0 0 24 24"><path d="M4 7h9v2H4V7Zm0 8h5v2H4v-2Zm12-9h4v4h-4V9h-1V7h1V6Zm-4 8h8v2h-8v1h-2v-4h2v1Z"/></svg><span>Devices</span></button>
+          <button id="cinemaModeBtn" class="meeting-action cinema-action" type="button" title="Cinema Mode: hide full panel and keep a movable call view"><svg viewBox="0 0 24 24"><path d="M3 5h18v12H3V5Zm2 2v8h14V7H5Zm3 11h8v2H8v-2Z"/></svg><span>Cinema</span></button>
         </div>
 
-        <div id="videoGrid" class="video-grid">
+        <section id="callSettingsPanel" class="call-settings-panel" hidden>
+          <div class="call-settings-header">
+            <div><strong>Call devices</strong><span>Change anything without leaving the room</span></div>
+            <button id="closeCallSettingsBtn" class="mini-close" type="button" aria-label="Close call settings">×</button>
+          </div>
+          <div id="deviceStatusBanner" class="device-status-banner"><span class="device-dot"></span><span id="deviceStatusText">Checking connected devices…</span></div>
+          <label class="device-field"><span>Camera</span><select id="cameraDeviceSelect"><option value="">Automatic camera</option></select></label>
+          <label class="device-field"><span>Microphone</span><select id="micDeviceSelect"><option value="">Automatic microphone</option></select></label>
+          <label id="speakerDeviceField" class="device-field"><span>Speaker / headphones</span><select id="speakerDeviceSelect"><option value="">System default</option></select></label>
+          <label class="device-field"><span>Camera quality</span><select id="callQualitySelect"><option value="sd">Data saver · 360p</option><option value="hd">Recommended · 720p</option><option value="fullhd">Maximum · 1080p</option></select></label>
+          <div class="device-actions"><button id="refreshDevicesBtn" type="button">Refresh devices</button><button id="applyDevicesBtn" class="primary-small" type="button">Apply changes</button></div>
+          <p class="device-help">Plug in a camera, microphone or headset at any time. APS detects it automatically; select it here or press the Camera/Mic button to start it.</p>
+        </section>
+
+        <section id="screenStage" class="screen-stage" hidden>
+          <div class="screen-stage-header">
+            <div><span class="presenting-dot"></span><strong id="screenPresenterName">Screen share</strong><small id="screenStatusText">Connecting…</small></div>
+            <div class="screen-stage-actions"><button id="screenViewToggleBtn" type="button">Hide</button><button id="screenStopBtn" class="stop-share-btn" type="button" hidden>Stop sharing</button></div>
+          </div>
+          <div class="screen-canvas"><video id="screenVideo" autoplay playsinline></video><div id="screenFallback" class="screen-fallback"><span>▣</span><strong>Connecting to shared screen…</strong></div></div>
+        </section>
+        <button id="screenHiddenBar" class="screen-hidden-bar" type="button" hidden><span class="presenting-dot"></span><strong id="screenHiddenText">A screen is being shared</strong><small>Show</small></button>
+
+        <div class="camera-layout-label"><span>Camera tiles</span><small>Automatically arranged like a meeting room</small></div>
+        <div id="videoGrid" class="video-grid meeting-grid">
           <article id="localVideoCard" class="video-card local-card">
             <video id="localVideo" autoplay muted playsinline></video>
             <div class="video-fallback" id="localFallback"><span id="localInitial">Y</span></div>

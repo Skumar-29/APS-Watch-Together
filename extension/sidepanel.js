@@ -1,3 +1,5 @@
+import { enumerateMediaDevices, friendlyDeviceLabel, withExactDevice, publishTrackToPeer, setAudioOutputForElements, deriveMediaMode } from './media-tools.js';
+import { buildRoomInviteUrl, isScreenShareStream, inactiveScreenShare } from './collaboration-tools.js';
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
 
@@ -35,8 +37,14 @@ const app = {
   remoteStreams: new Map(),
   localStream: null,
   mediaMode: 'av',
+  mediaIntent: { audio: true, video: true },
   mediaAvailable: { audio: false, video: false },
   mediaEnabled: { audio: true, video: true },
+  devicePreferences: { audioinput: '', videoinput: '', audiooutput: '' },
+  devices: { audioinput: [], videoinput: [], audiooutput: [] },
+  deviceChangeTimer: null,
+  mediaOperation: null,
+  pendingMediaActivation: '',
   mediaWarnings: [],
   sharedControls: false,
   roomLocked: false,
@@ -53,34 +61,49 @@ const app = {
   permissionTabOpen: false,
   handoffToCinema: false,
   cinemaStarting: false,
-  restoreInProgress: false
+  restoreInProgress: false,
+  negotiationTimers: new Map(),
+  pendingInvite: null,
+  screenShare: inactiveScreenShare(),
+  localScreenStream: null,
+  remoteScreenStreams: new Map(),
+  peerStreamRegistry: new Map(),
+  screenSenders: new Map(),
+  screenViewHidden: false,
+  screenOperation: false,
+  stoppingScreenShare: false
 };
 
 const elements = {
-  setupView: $('#setupView'), roomView: $('#roomView'), displayName: $('#displayName'), roomCodeInput: $('#roomCodeInput'),
-  mediaModeChoices: $('#mediaModeChoices'), mediaModeStatus: $('#mediaModeStatus'), mediaModeHint: $('#mediaModeHint'),
+  setupView: $('#setupView'), roomView: $('#roomView'), displayName: $('#displayName'), roomCodeInput: $('#roomCodeInput'), inviteReadyBanner: $('#inviteReadyBanner'), inviteReadyCode: $('#inviteReadyCode'),
+  mediaModeChoices: $('#mediaModeChoices'), mediaModeStatus: $('#mediaModeStatus'), mediaModeHint: $('#mediaModeHint'), preJoinCameraBtn: $('#preJoinCameraBtn'), preJoinMicBtn: $('#preJoinMicBtn'), preJoinCameraStatus: $('#preJoinCameraStatus'), preJoinMicStatus: $('#preJoinMicStatus'),
   createRoomBtn: $('#createRoomBtn'), joinRoomBtn: $('#joinRoomBtn'), openSettingsBtn: $('#openSettingsBtn'),
-  connectionCaption: $('#connectionCaption'), roomCodeText: $('#roomCodeText'), copyRoomCodeBtn: $('#copyRoomCodeBtn'),
+  connectionCaption: $('#connectionCaption'), roomCodeText: $('#roomCodeText'), copyRoomCodeBtn: $('#copyRoomCodeBtn'), shareInviteBtn: $('#shareInviteBtn'),
   roleBadge: $('#roleBadge'), leaveRoomBtn: $('#leaveRoomBtn'), serviceBadge: $('#serviceBadge'), syncBadge: $('#syncBadge'),
   mediaTitle: $('#mediaTitle'), currentTimeText: $('#currentTimeText'), durationText: $('#durationText'), timeline: $('#timeline'), timelineFill: $('#timelineFill'),
   rewindBtn: $('#rewindBtn'), playPauseBtn: $('#playPauseBtn'), playPauseIcon: $('#playPauseIcon'), forwardBtn: $('#forwardBtn'),
   resyncBtn: $('#resyncBtn'), playerMessage: $('#playerMessage'), participantCount: $('#participantCount'), peopleCountPill: $('#peopleCountPill'),
   videoGrid: $('#videoGrid'), localVideoCard: $('#localVideoCard'), localVideo: $('#localVideo'), localFallback: $('#localFallback'), localInitial: $('#localInitial'),
-  cinemaModeBtn: $('#cinemaModeBtn'), toggleMicBtn: $('#toggleMicBtn'), toggleCameraBtn: $('#toggleCameraBtn'), localMicState: $('#localMicState'), localModeLabel: $('#localModeLabel'), peopleTabBtn: $('#peopleTabBtn'),
+  cinemaModeBtn: $('#cinemaModeBtn'), screenShareBtn: $('#screenShareBtn'), screenStage: $('#screenStage'), screenVideo: $('#screenVideo'), screenFallback: $('#screenFallback'), screenPresenterName: $('#screenPresenterName'), screenStatusText: $('#screenStatusText'), screenViewToggleBtn: $('#screenViewToggleBtn'), screenStopBtn: $('#screenStopBtn'), screenHiddenBar: $('#screenHiddenBar'), screenHiddenText: $('#screenHiddenText'), callSettingsBtn: $('#callSettingsBtn'), closeCallSettingsBtn: $('#closeCallSettingsBtn'), callSettingsPanel: $('#callSettingsPanel'), deviceStatusBanner: $('#deviceStatusBanner'), deviceStatusText: $('#deviceStatusText'), cameraDeviceSelect: $('#cameraDeviceSelect'), micDeviceSelect: $('#micDeviceSelect'), speakerDeviceSelect: $('#speakerDeviceSelect'), speakerDeviceField: $('#speakerDeviceField'), callQualitySelect: $('#callQualitySelect'), refreshDevicesBtn: $('#refreshDevicesBtn'), applyDevicesBtn: $('#applyDevicesBtn'), toggleMicBtn: $('#toggleMicBtn'), toggleCameraBtn: $('#toggleCameraBtn'), localMicState: $('#localMicState'), localModeLabel: $('#localModeLabel'), peopleTabBtn: $('#peopleTabBtn'),
   chatTabBtn: $('#chatTabBtn'), peoplePanel: $('#peoplePanel'), chatPanel: $('#chatPanel'), peopleList: $('#peopleList'), unreadPill: $('#unreadPill'),
   sharedControlsToggle: $('#sharedControlsToggle'), roomLockToggle: $('#roomLockToggle'), chatForm: $('#chatForm'), chatInput: $('#chatInput'), messages: $('#messages'),
   toastRegion: $('#toastRegion'), reactionLayer: $('#reactionLayer')
 };
 
 async function init() {
-  const stored = await chrome.storage.local.get(['apsSettings', 'apsProfile', 'apsActiveRoom', 'apsRestoreRoom', 'apsMediaMode']);
+  const stored = await chrome.storage.local.get(['apsSettings', 'apsProfile', 'apsActiveRoom', 'apsRestoreRoom', 'apsMediaMode', 'apsDevicePreferences', 'apsMediaIntent', 'apsPendingInvite', 'apsScreenViewPreferences']);
   app.settings = stored.apsSettings || {};
   app.profile = stored.apsProfile || { displayName: '', avatarSeed: crypto.randomUUID() };
-  setMediaMode(stored.apsMediaMode || stored.apsActiveRoom?.mediaMode || 'av', false);
+  app.devicePreferences = { ...app.devicePreferences, ...(stored.apsDevicePreferences || {}) };
+  app.screenViewHidden = Boolean(stored.apsScreenViewPreferences?.hidden);
+  app.mediaIntent = stored.apsMediaIntent || mediaIntentForMode(stored.apsMediaMode || stored.apsActiveRoom?.mediaMode || 'av');
+  setMediaIntent(app.mediaIntent, false);
   elements.displayName.value = app.profile.displayName || '';
   elements.localInitial.textContent = initialOf(app.profile.displayName || 'You');
 
   bindEvents();
+  setupDeviceMonitoring();
+  await refreshDeviceList({ quiet: true });
   setView('setup');
   updateConnectionUI();
   await pollPlayer(true);
@@ -89,9 +112,21 @@ async function init() {
   const restore = stored.apsRestoreRoom;
   const active = stored.apsActiveRoom;
   const validRestore = restore?.roomCode && restore.expiresAt > Date.now() && active?.roomCode === restore.roomCode;
+  const invite = stored.apsPendingInvite;
+  if (!validRestore && invite?.roomCode && invite.expiresAt > Date.now()) {
+    app.pendingInvite = invite;
+    elements.roomCodeInput.value = formatRoomCode(invite.roomCode);
+    elements.inviteReadyCode.textContent = formatRoomCode(invite.roomCode);
+    elements.inviteReadyBanner.hidden = false;
+    if (app.profile.displayName) {
+      setTimeout(() => beginRoomFlow('join'), 420);
+    } else {
+      elements.displayName.focus();
+    }
+  }
   if (validRestore) {
     app.restoreInProgress = true;
-    setMediaMode(active.mediaMode || stored.apsMediaMode || 'av', false);
+    setMediaIntent(stored.apsMediaIntent || mediaIntentForMode(active.mediaMode || stored.apsMediaMode || 'av'), false);
     app.pendingJoin = { mode: 'join', roomCode: restore.roomCode, mediaMode: app.mediaMode };
     app.intentionallyLeft = false;
     setBusy(true, 'Restoring…');
@@ -122,11 +157,14 @@ function bindEvents() {
     if (event.key === 'Enter') beginRoomFlow('create');
   });
   elements.mediaModeChoices.addEventListener('click', (event) => {
-    const choice = event.target.closest('[data-media-mode]');
-    if (choice) setMediaMode(choice.dataset.mediaMode, true);
+    const choice = event.target.closest('[data-media-kind]');
+    if (!choice) return;
+    const kind = choice.dataset.mediaKind;
+    setMediaIntent({ ...app.mediaIntent, [kind === 'audio' ? 'audio' : 'video']: !app.mediaIntent[kind === 'audio' ? 'audio' : 'video'] }, true);
   });
   elements.openSettingsBtn.addEventListener('click', () => chrome.runtime.openOptionsPage());
-  elements.copyRoomCodeBtn.addEventListener('click', copyInvite);
+  elements.copyRoomCodeBtn.addEventListener('click', copyRoomCode);
+  elements.shareInviteBtn.addEventListener('click', shareRoomInvite);
   elements.leaveRoomBtn.addEventListener('click', leaveRoom);
   elements.playPauseBtn.addEventListener('click', togglePlayPause);
   elements.rewindBtn.addEventListener('click', () => sendLocalControl({ kind: 'skip', amount: -10 }));
@@ -135,6 +173,18 @@ function bindEvents() {
   elements.timeline.addEventListener('click', seekFromTimeline);
   elements.timeline.addEventListener('keydown', seekTimelineWithKeyboard);
   elements.cinemaModeBtn.addEventListener('click', startCinemaMode);
+  elements.screenShareBtn.addEventListener('click', toggleScreenShare);
+  elements.screenViewToggleBtn.addEventListener('click', toggleScreenView);
+  elements.screenHiddenBar.addEventListener('click', toggleScreenView);
+  elements.screenStopBtn.addEventListener('click', () => stopScreenShare(true));
+  elements.callSettingsBtn.addEventListener('click', toggleCallSettings);
+  elements.closeCallSettingsBtn.addEventListener('click', () => toggleCallSettings(false));
+  elements.refreshDevicesBtn.addEventListener('click', () => refreshDeviceList({ announce: true }));
+  elements.applyDevicesBtn.addEventListener('click', applySelectedDevices);
+  elements.cameraDeviceSelect.addEventListener('change', () => rememberSelectedDevices());
+  elements.micDeviceSelect.addEventListener('change', () => rememberSelectedDevices());
+  elements.speakerDeviceSelect.addEventListener('change', applyAudioOutputSelection);
+  elements.callQualitySelect.addEventListener('change', () => { app.settings.videoQuality = elements.callQualitySelect.value; });
   elements.toggleMicBtn.addEventListener('click', toggleMicrophone);
   elements.toggleCameraBtn.addEventListener('click', toggleCamera);
   elements.peopleTabBtn.addEventListener('click', () => setTab('people'));
@@ -147,8 +197,18 @@ function bindEvents() {
   chrome.runtime.onMessage.addListener((message, sender) => {
     if (message?.type === 'APS_MEDIA_PERMISSION_GRANTED') {
       app.permissionTabOpen = false;
-      if (message.mediaMode && MEDIA_MODES[message.mediaMode]) setMediaMode(message.mediaMode, true);
-      resumeRoomFlowAfterPermission();
+      if (app.pendingMediaActivation && app.roomCode) {
+        const kind = app.pendingMediaActivation;
+        app.pendingMediaActivation = '';
+        if (message.cancelled || message.mediaMode === 'watch') {
+          toast(`${kind === 'video' ? 'Camera' : 'Microphone'} remains off. You can try again anytime.`, 'error');
+          return;
+        }
+        activateMediaKind(kind).catch((error) => toast(describeMediaError(error), 'error'));
+      } else {
+        if (message.mediaMode && MEDIA_MODES[message.mediaMode]) setMediaIntent(mediaIntentForMode(message.mediaMode), true);
+        resumeRoomFlowAfterPermission();
+      }
       return;
     }
     if (message?.type === 'APS_MEDIA_PERMISSION_DENIED') {
@@ -170,25 +230,44 @@ function bindEvents() {
 
   window.addEventListener('beforeunload', () => {
     if (!app.handoffToCinema && app.socket?.readyState === WebSocket.OPEN) sendSocket({ type: 'leave-room' });
+    stopScreenShare(false);
     stopLocalMedia();
+    navigator.mediaDevices?.removeEventListener?.('devicechange', handleDeviceChange);
   });
 }
 
-function setMediaMode(mode, persist = true) {
-  const next = MEDIA_MODES[mode] ? mode : 'av';
-  app.mediaMode = next;
-  const config = MEDIA_MODES[next];
-  if (!app.roomCode) app.mediaEnabled = { audio: config.audio, video: config.video };
-  elements.mediaModeStatus.textContent = config.status;
-  elements.mediaModeHint.textContent = next === 'watch'
-    ? 'You can still watch in sync, use chat and reactions, and see or hear friends who share media.'
-    : 'APS automatically continues with any available selected device if one is missing.';
-  for (const button of elements.mediaModeChoices.querySelectorAll('[data-media-mode]')) {
-    const active = button.dataset.mediaMode === next;
-    button.classList.toggle('active', active);
-    button.setAttribute('aria-checked', String(active));
-  }
-  if (persist) chrome.storage.local.set({ apsMediaMode: next });
+function mediaIntentForMode(mode) {
+  const config = MEDIA_MODES[MEDIA_MODES[mode] ? mode : 'av'];
+  return { audio: config.audio, video: config.video };
+}
+
+function setMediaIntent(intent, persist = true) {
+  app.mediaIntent = { audio: Boolean(intent?.audio), video: Boolean(intent?.video) };
+  app.mediaMode = deriveMediaMode(app.mediaIntent);
+  if (!app.roomCode) app.mediaEnabled = { ...app.mediaIntent };
+  const labels = [];
+  if (app.mediaIntent.video) labels.push('camera');
+  if (app.mediaIntent.audio) labels.push('microphone');
+  elements.mediaModeStatus.textContent = labels.length ? `${labels.join(' and ')} on` : 'Watch only';
+  elements.mediaModeHint.textContent = labels.length
+    ? 'Turn either one off now, or change devices at any time after joining.'
+    : 'You can still watch in sync, chat and see or hear friends.';
+  updatePreJoinDeviceButton(elements.preJoinCameraBtn, elements.preJoinCameraStatus, 'video');
+  updatePreJoinDeviceButton(elements.preJoinMicBtn, elements.preJoinMicStatus, 'audio');
+  if (persist) chrome.storage.local.set({ apsMediaMode: app.mediaMode, apsMediaIntent: app.mediaIntent });
+}
+
+function updatePreJoinDeviceButton(button, statusElement, kind) {
+  if (!button || !statusElement) return;
+  const enabled = app.mediaIntent[kind === 'audio' ? 'audio' : 'video'];
+  button.classList.toggle('active', enabled);
+  button.setAttribute('aria-pressed', String(enabled));
+  const devices = kind === 'video' ? app.devices.videoinput : app.devices.audioinput;
+  const selectedId = kind === 'video' ? app.devicePreferences.videoinput : app.devicePreferences.audioinput;
+  const selected = devices.find((device) => device.deviceId === selectedId) || devices[0];
+  statusElement.textContent = enabled
+    ? (selected ? `On · ${friendlyDeviceLabel(selected, devices.indexOf(selected), kind === 'video' ? 'Camera' : 'Microphone')}` : `On · connect ${kind === 'video' ? 'camera' : 'microphone'}`)
+    : 'Off';
 }
 
 async function beginRoomFlow(mode) {
@@ -210,7 +289,7 @@ async function beginRoomFlow(mode) {
   }
 
   app.profile.displayName = displayName;
-  await chrome.storage.local.set({ apsProfile: app.profile, apsMediaMode: app.mediaMode });
+  await chrome.storage.local.set({ apsProfile: app.profile, apsMediaMode: app.mediaMode, apsMediaIntent: app.mediaIntent, apsDevicePreferences: app.devicePreferences });
   elements.localInitial.textContent = initialOf(displayName);
   app.pendingJoin = { mode, roomCode, mediaMode: app.mediaMode };
   app.intentionallyLeft = false;
@@ -241,7 +320,7 @@ function describeMediaError(error) {
   return error?.message || 'The selected call devices could not be started.';
 }
 
-async function openMediaPermissionTab() {
+async function openMediaPermissionTab(mode = app.mediaMode) {
   setBusy(false);
   if (app.permissionTabOpen) {
     toast('Complete the camera or microphone permission tab, then return here.', 'error');
@@ -250,7 +329,8 @@ async function openMediaPermissionTab() {
   app.permissionTabOpen = true;
   try {
     const url = new URL(chrome.runtime.getURL('request-permissions.html'));
-    url.searchParams.set('mode', app.mediaMode);
+    url.searchParams.set('mode', mode);
+    url.searchParams.set('purpose', app.roomCode ? 'activate' : 'join');
     await chrome.tabs.create({ url: url.href, active: true });
     toast('A permission tab opened. Allow the selected call devices or continue in Watch only mode.', 'success');
   } catch (error) {
@@ -297,7 +377,7 @@ function connectSocket() {
       displayName: app.profile.displayName,
       clientVersion: chrome.runtime.getManifest().version,
       sessionId: app.profile.avatarSeed,
-      capabilities: { playback: true, audio: app.mediaEnabled.audio, video: app.mediaEnabled.video, chat: true }
+      capabilities: { playback: true, audio: app.mediaEnabled.audio, video: app.mediaEnabled.video, chat: true, screenShare: true, inviteLinks: true }
     });
     if (app.pendingJoin?.mode === 'create') sendSocket({ type: 'create-room' });
     else if (app.pendingJoin?.mode === 'join') sendSocket({ type: 'join-room', roomCode: app.pendingJoin.roomCode });
@@ -381,6 +461,9 @@ async function handleSocketMessage(message) {
       elements.roomLockToggle.checked = app.roomLocked;
       toast(app.roomLocked ? 'The room is now locked.' : 'The room is open for invited friends.');
       break;
+    case 'screen-share-state':
+      handleScreenShareState(message.screenShare);
+      break;
     case 'media-state': {
       const participant = app.participants.get(message.participantId);
       if (participant) {
@@ -399,6 +482,7 @@ async function handleSocketMessage(message) {
     case 'pong':
       break;
     case 'error':
+      if (/screen.*already|already.*screen|presenting/i.test(String(message.message || '')) && app.localScreenStream) stopScreenShare(false);
       setBusy(false);
       toast(message.message || 'Room error.', 'error');
       if (!app.roomCode) app.socket?.close();
@@ -414,9 +498,15 @@ function enterRoom(message) {
   app.hostId = message.hostId;
   app.sharedControls = Boolean(message.everyoneCanControl);
   app.roomLocked = Boolean(message.locked);
+  app.screenShare = message.screenShare || inactiveScreenShare();
   for (const pc of app.peerConnections.values()) pc.close();
   app.peerConnections.clear();
   app.remoteStreams.clear();
+  app.remoteScreenStreams.clear();
+  app.peerStreamRegistry.clear();
+  app.screenSenders.clear();
+  app.screenShare = inactiveScreenShare();
+  updateScreenShareUI();
   document.querySelectorAll('[data-peer-card]').forEach((node) => node.remove());
   app.participants.clear();
   for (const participant of message.participants || []) addParticipant(participant, false);
@@ -424,6 +514,9 @@ function enterRoom(message) {
     addParticipant({ id: app.selfId, name: app.profile.displayName, media: { ...app.mediaEnabled } }, false);
   }
   app.pendingJoin = null;
+  app.pendingInvite = null;
+  chrome.storage.local.remove('apsPendingInvite');
+  elements.inviteReadyBanner.hidden = true;
   app.intentionallyLeft = false;
   elements.roomCodeText.textContent = formatRoomCode(app.roomCode);
   elements.sharedControlsToggle.checked = app.sharedControls;
@@ -432,6 +525,7 @@ function enterRoom(message) {
   setView('room');
   updateRole();
   updateParticipantUI();
+  updateScreenShareUI();
   startHeartbeat();
   toast(message.type === 'room-created' ? 'Private room created.' : 'Joined the watch room.', 'success');
   chrome.storage.local.set({
@@ -455,6 +549,7 @@ function enterRoom(message) {
   }
   sendSocket({ type: 'media-state', media: app.mediaEnabled });
   applyLocalMediaState(false);
+  refreshDeviceList({ quiet: true }).then(applyAudioOutputSelection).catch(() => undefined);
   if (app.mediaWarnings.length) {
     toast(app.mediaWarnings.join(' '), app.mediaAvailable.audio || app.mediaAvailable.video ? 'success' : 'error');
     app.mediaWarnings = [];
@@ -465,6 +560,7 @@ function updateRoomState(message) {
   if (Object.prototype.hasOwnProperty.call(message, 'hostId')) app.hostId = message.hostId;
   app.sharedControls = Boolean(message.everyoneCanControl);
   app.roomLocked = Boolean(message.locked);
+  if (message.screenShare) handleScreenShareState(message.screenShare, false);
   elements.sharedControlsToggle.checked = app.sharedControls;
   elements.roomLockToggle.checked = app.roomLocked;
   if (Array.isArray(message.participants)) {
@@ -493,7 +589,12 @@ function removeParticipant(participantId) {
   const peer = app.peerConnections.get(participantId);
   if (peer) peer.close();
   app.peerConnections.delete(participantId);
+  clearTimeout(app.negotiationTimers.get(participantId));
+  app.negotiationTimers.delete(participantId);
   app.remoteStreams.delete(participantId);
+  app.remoteScreenStreams.delete(participantId);
+  app.peerStreamRegistry.delete(participantId);
+  app.screenSenders.delete(participantId);
   document.querySelector(`[data-peer-card="${CSS.escape(participantId)}"]`)?.remove();
   updateParticipantUI();
 }
@@ -521,34 +622,188 @@ function updateControlPermissions() {
       : 'Only the host can control playback in this room.';
 }
 
-function videoConstraintsForQuality() {
+function setupDeviceMonitoring() {
+  navigator.mediaDevices?.addEventListener?.('devicechange', handleDeviceChange);
+  elements.callQualitySelect.value = app.settings.videoQuality || 'hd';
+  elements.speakerDeviceField.hidden = typeof HTMLMediaElement.prototype.setSinkId !== 'function';
+}
+
+function handleDeviceChange() {
+  clearTimeout(app.deviceChangeTimer);
+  app.deviceChangeTimer = setTimeout(async () => {
+    const previousIds = new Set(Object.values(app.devices).flat().map((device) => `${device.kind}:${device.deviceId}`));
+    await refreshDeviceList({ quiet: true });
+    const nextIds = new Set(Object.values(app.devices).flat().map((device) => `${device.kind}:${device.deviceId}`));
+    const added = [...nextIds].some((id) => !previousIds.has(id));
+    const removed = [...previousIds].some((id) => !nextIds.has(id));
+    if (added) {
+      setDeviceStatus('New call device detected. APS is checking whether it should reconnect automatically.', 'ready');
+      toast('New camera, microphone or headset detected.', 'success');
+      if (app.roomCode) {
+        if (app.mediaIntent.video && !app.mediaAvailable.video && app.devices.videoinput.length) await activateMediaKind('video', { quiet: true }).catch(() => undefined);
+        if (app.mediaIntent.audio && !app.mediaAvailable.audio && app.devices.audioinput.length) await activateMediaKind('audio', { quiet: true }).catch(() => undefined);
+      }
+    } else if (removed) {
+      setDeviceStatus('A call device was disconnected. APS kept the room active.', 'warning');
+    }
+  }, 350);
+}
+
+async function refreshDeviceList({ quiet = false, announce = false } = {}) {
+  try {
+    app.devices = await enumerateMediaDevices();
+    populateDeviceSelect(elements.cameraDeviceSelect, app.devices.videoinput, app.devicePreferences.videoinput, 'Automatic camera', 'Camera');
+    populateDeviceSelect(elements.micDeviceSelect, app.devices.audioinput, app.devicePreferences.audioinput, 'Automatic microphone', 'Microphone');
+    populateDeviceSelect(elements.speakerDeviceSelect, app.devices.audiooutput, app.devicePreferences.audiooutput, 'System default', 'Speaker');
+    updatePreJoinDeviceButton(elements.preJoinCameraBtn, elements.preJoinCameraStatus, 'video');
+    updatePreJoinDeviceButton(elements.preJoinMicBtn, elements.preJoinMicStatus, 'audio');
+    if (announce) toast('Call devices refreshed.', 'success');
+    if (!quiet) setDeviceStatus(deviceSummaryText(), 'ready');
+  } catch (error) {
+    if (!quiet) setDeviceStatus(error?.message || 'Could not read connected call devices.', 'error');
+  }
+}
+
+function populateDeviceSelect(select, devices, selectedId, automaticLabel, fallback) {
+  if (!select) return;
+  const current = selectedId || select.value || '';
+  select.replaceChildren();
+  const automatic = document.createElement('option');
+  automatic.value = '';
+  automatic.textContent = automaticLabel;
+  select.appendChild(automatic);
+  devices.forEach((device, index) => {
+    const option = document.createElement('option');
+    option.value = device.deviceId;
+    option.textContent = friendlyDeviceLabel(device, index, fallback);
+    select.appendChild(option);
+  });
+  select.value = devices.some((device) => device.deviceId === current) ? current : '';
+}
+
+function deviceSummaryText() {
+  const cameras = app.devices.videoinput.length;
+  const microphones = app.devices.audioinput.length;
+  const outputs = app.devices.audiooutput.length;
+  return `${cameras || 'No'} camera${cameras === 1 ? '' : 's'} · ${microphones || 'No'} microphone${microphones === 1 ? '' : 's'}${outputs ? ` · ${outputs} output${outputs === 1 ? '' : 's'}` : ''}`;
+}
+
+function setDeviceStatus(message, kind = 'ready') {
+  elements.deviceStatusText.textContent = message;
+  elements.deviceStatusBanner.classList.toggle('warning', kind === 'warning');
+  elements.deviceStatusBanner.classList.toggle('error', kind === 'error');
+}
+
+async function toggleCallSettings(force) {
+  const show = typeof force === 'boolean' ? force : elements.callSettingsPanel.hidden;
+  elements.callSettingsPanel.hidden = !show;
+  elements.callSettingsBtn.classList.toggle('active', show);
+  elements.callSettingsBtn.setAttribute('aria-expanded', String(show));
+  if (show) {
+    elements.callQualitySelect.value = app.settings.videoQuality || 'hd';
+    await refreshDeviceList({ quiet: false });
+  }
+}
+
+function rememberSelectedDevices() {
+  app.devicePreferences = {
+    videoinput: elements.cameraDeviceSelect.value || '',
+    audioinput: elements.micDeviceSelect.value || '',
+    audiooutput: elements.speakerDeviceSelect.value || ''
+  };
+  chrome.storage.local.set({ apsDevicePreferences: app.devicePreferences });
+}
+
+async function applySelectedDevices() {
+  if (app.mediaOperation) return;
+  rememberSelectedDevices();
+  app.settings.videoQuality = elements.callQualitySelect.value || 'hd';
+  await chrome.storage.local.set({ apsSettings: app.settings });
+  elements.applyDevicesBtn.disabled = true;
+  elements.applyDevicesBtn.textContent = 'Applying…';
+  try {
+    if (app.mediaIntent.video || app.mediaAvailable.video) {
+      const applied = await activateMediaKind('video', { force: true, quiet: true, preserveState: true });
+      if (applied === false) { setDeviceStatus('Complete the camera permission tab, then return here.', 'warning'); return; }
+    }
+    if (app.mediaIntent.audio || app.mediaAvailable.audio) {
+      const applied = await activateMediaKind('audio', { force: true, quiet: true, preserveState: true });
+      if (applied === false) { setDeviceStatus('Complete the microphone permission tab, then return here.', 'warning'); return; }
+    }
+    await applyAudioOutputSelection();
+    setDeviceStatus('Call devices updated without leaving the room.', 'ready');
+    toast('Call devices updated.', 'success');
+  } catch (error) {
+    setDeviceStatus(describeMediaError(error), 'error');
+    toast(describeMediaError(error), 'error');
+  } finally {
+    elements.applyDevicesBtn.disabled = false;
+    elements.applyDevicesBtn.textContent = 'Apply changes';
+  }
+}
+
+async function applyAudioOutputSelection() {
+  app.devicePreferences.audiooutput = elements.speakerDeviceSelect.value || '';
+  await chrome.storage.local.set({ apsDevicePreferences: app.devicePreferences });
+  const result = await setAudioOutputForElements(document, app.devicePreferences.audiooutput);
+  if (result.unsupported) setDeviceStatus('Chrome is using the system default speaker on this device.', 'warning');
+}
+
+function videoConstraintsForQuality(deviceId = app.devicePreferences.videoinput) {
   const quality = app.settings.videoQuality || 'hd';
-  return quality === 'fullhd'
+  const base = quality === 'fullhd'
     ? { width: { ideal: 1920, max: 1920 }, height: { ideal: 1080, max: 1080 }, frameRate: { ideal: 30, max: 30 }, facingMode: 'user' }
     : quality === 'sd'
       ? { width: { ideal: 640 }, height: { ideal: 360 }, frameRate: { ideal: 24, max: 30 }, facingMode: 'user' }
       : { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 30 }, facingMode: 'user' };
+  return withExactDevice(base, deviceId);
 }
 
-function audioConstraints() {
-  return {
+function audioConstraints(deviceId = app.devicePreferences.audioinput) {
+  return withExactDevice({
     echoCancellation: app.settings.echoCancellation !== false,
     noiseSuppression: app.settings.noiseSuppression !== false,
     autoGainControl: app.settings.autoGainControl !== false,
     channelCount: 1
-  };
+  }, deviceId);
 }
 
-async function requestMediaKind(kind) {
+async function requestMediaKind(kind, deviceId) {
+  const selected = deviceId ?? (kind === 'video' ? app.devicePreferences.videoinput : app.devicePreferences.audioinput);
   const constraints = kind === 'video'
-    ? { video: videoConstraintsForQuality(), audio: false }
-    : { video: false, audio: audioConstraints() };
-  return navigator.mediaDevices.getUserMedia(constraints);
+    ? { video: videoConstraintsForQuality(selected), audio: false }
+    : { video: false, audio: audioConstraints(selected) };
+  try {
+    return await navigator.mediaDevices.getUserMedia(constraints);
+  } catch (error) {
+    if (selected && ['NotFoundError', 'OverconstrainedError'].includes(error?.name)) {
+      if (kind === 'video') app.devicePreferences.videoinput = '';
+      else app.devicePreferences.audioinput = '';
+      await chrome.storage.local.set({ apsDevicePreferences: app.devicePreferences });
+      return navigator.mediaDevices.getUserMedia(kind === 'video'
+        ? { video: videoConstraintsForQuality(''), audio: false }
+        : { video: false, audio: audioConstraints('') });
+    }
+    throw error;
+  }
+}
+
+function bindLocalTrackLifecycle(kind, track) {
+  track.addEventListener('ended', () => {
+    const current = kind === 'audio' ? app.localStream?.getAudioTracks()[0] : app.localStream?.getVideoTracks()[0];
+    if (current?.id !== track.id) return;
+    app.localStream?.removeTrack(track);
+    app.mediaAvailable[kind] = false;
+    app.mediaEnabled[kind] = false;
+    applyLocalMediaState();
+    setDeviceStatus(`${kind === 'video' ? 'Camera' : 'Microphone'} disconnected. Connect another one and press the ${kind === 'video' ? 'Camera' : 'Mic'} button.`, 'warning');
+  }, { once: true });
 }
 
 async function ensureLocalMedia(mode = app.mediaMode) {
   stopLocalMedia();
   const requested = MEDIA_MODES[mode] || MEDIA_MODES.av;
+  app.mediaIntent = { audio: requested.audio, video: requested.video };
   app.mediaWarnings = [];
   app.mediaAvailable = { audio: false, video: false };
   app.mediaEnabled = { audio: false, video: false };
@@ -571,7 +826,10 @@ async function ensureLocalMedia(mode = app.mediaMode) {
     if (!requested[kind]) continue;
     try {
       const partial = await requestMediaKind(kind);
-      for (const track of partial.getTracks()) combined.addTrack(track);
+      for (const track of partial.getTracks()) {
+        combined.addTrack(track);
+        bindLocalTrackLifecycle(kind, track);
+      }
     } catch (error) {
       if (isMediaPermissionError(error)) permissionErrors.push(error);
       else if (error?.name === 'NotFoundError') app.mediaWarnings.push(`No ${kind === 'video' ? 'camera' : 'microphone'} was found.`);
@@ -586,27 +844,86 @@ async function ensureLocalMedia(mode = app.mediaMode) {
     error.apsPermissionError = true;
     throw error;
   }
-  if (permissionErrors.length) {
-    app.mediaWarnings.push('One selected device was blocked. APS continued with the device that is available.');
-  }
+  if (permissionErrors.length) app.mediaWarnings.push('One selected device was blocked. APS continued with the device that is available.');
 
   app.localStream = combined;
   app.mediaAvailable = {
     audio: combined.getAudioTracks().some((track) => track.readyState === 'live'),
     video: combined.getVideoTracks().some((track) => track.readyState === 'live')
   };
-  app.mediaEnabled = { ...app.mediaAvailable };
+  app.mediaEnabled = {
+    audio: app.mediaAvailable.audio && app.mediaIntent.audio,
+    video: app.mediaAvailable.video && app.mediaIntent.video
+  };
   elements.localVideo.srcObject = combined;
   if (app.mediaAvailable.video) elements.localVideo.play().catch(() => undefined);
   if (!combined.getTracks().length) app.mediaWarnings.push('No selected call device is available. Joined in Watch only mode.');
   applyLocalMediaState(false);
+  await refreshDeviceList({ quiet: true });
   return combined;
+}
+
+async function activateMediaKind(kind, { force = false, quiet = false, preserveState = false } = {}) {
+  if (!['audio', 'video'].includes(kind)) return;
+  if (app.mediaOperation && !force) return;
+  app.mediaOperation = kind;
+  const button = kind === 'audio' ? elements.toggleMicBtn : elements.toggleCameraBtn;
+  button.classList.add('busy');
+  const desiredEnabled = preserveState ? (app.mediaAvailable[kind] ? app.mediaEnabled[kind] : app.mediaIntent[kind]) : true;
+  const desiredIntent = preserveState ? app.mediaIntent[kind] : true;
+  app.mediaIntent[kind] = desiredIntent;
+  app.mediaMode = deriveMediaMode(app.mediaIntent);
+  await chrome.storage.local.set({ apsMediaMode: app.mediaMode, apsMediaIntent: app.mediaIntent });
+  try {
+    if (!navigator.mediaDevices?.getUserMedia) throw new Error('Chrome cannot access call devices on this computer.');
+    const partial = await requestMediaKind(kind);
+    const track = kind === 'audio' ? partial.getAudioTracks()[0] : partial.getVideoTracks()[0];
+    if (!track) throw new Error(`No ${kind === 'video' ? 'camera' : 'microphone'} was found.`);
+    await replaceLocalTrack(kind, track, desiredEnabled);
+    partial.getTracks().filter((item) => item.id !== track.id).forEach((item) => item.stop());
+    if (!quiet) toast(`${kind === 'video' ? 'Camera' : 'Microphone'} is now on.`, 'success');
+    setDeviceStatus(`${kind === 'video' ? 'Camera' : 'Microphone'} connected and active.`, 'ready');
+    await refreshDeviceList({ quiet: true });
+    return true;
+  } catch (error) {
+    if (isMediaPermissionError(error)) {
+      app.pendingMediaActivation = kind;
+      await openMediaPermissionTab(kind === 'audio' ? 'audio' : 'video');
+      return false;
+    }
+    throw error;
+  } finally {
+    app.mediaOperation = null;
+    button.classList.remove('busy');
+    applyLocalMediaState();
+  }
+}
+
+async function replaceLocalTrack(kind, newTrack, enabled = true) {
+  if (!app.localStream) app.localStream = new MediaStream();
+  const oldTracks = kind === 'audio' ? app.localStream.getAudioTracks() : app.localStream.getVideoTracks();
+  for (const oldTrack of oldTracks) app.localStream.removeTrack(oldTrack);
+  app.localStream.addTrack(newTrack);
+  newTrack.enabled = Boolean(enabled);
+  bindLocalTrackLifecycle(kind, newTrack);
+
+  for (const [peerId, pc] of app.peerConnections) {
+    const result = await publishTrackToPeer(pc, kind, newTrack, app.localStream);
+    if (result.needsNegotiation) schedulePeerNegotiation(peerId);
+  }
+  oldTracks.forEach((track) => track.stop());
+  app.mediaAvailable[kind] = true;
+  app.mediaEnabled[kind] = Boolean(enabled);
+  elements.localVideo.srcObject = app.localStream;
+  if (kind === 'video') elements.localVideo.play().catch(() => undefined);
+  applyLocalMediaState();
 }
 
 function stopLocalMedia() {
   app.localStream?.getTracks().forEach((track) => track.stop());
   app.localStream = null;
   app.mediaAvailable = { audio: false, video: false };
+  app.mediaEnabled = { audio: false, video: false };
   elements.localVideo.srcObject = null;
 }
 
@@ -629,36 +946,66 @@ function applyLocalMediaState(broadcast = true) {
   for (const track of audioTracks) track.enabled = app.mediaEnabled.audio;
   for (const track of videoTracks) track.enabled = app.mediaEnabled.video;
 
-  elements.toggleMicBtn.disabled = !app.mediaAvailable.audio;
-  elements.toggleMicBtn.className = `round-action ${app.mediaAvailable.audio ? (app.mediaEnabled.audio ? 'active' : 'off') : 'unavailable'}`;
-  elements.toggleMicBtn.querySelector('svg').innerHTML = app.mediaEnabled.audio ? ICONS.mic : ICONS.micOff;
-  elements.toggleMicBtn.title = app.mediaAvailable.audio ? (app.mediaEnabled.audio ? 'Mute microphone' : 'Unmute microphone') : 'No microphone is active in this session';
-  elements.toggleMicBtn.setAttribute('aria-label', elements.toggleMicBtn.title);
-
-  elements.toggleCameraBtn.disabled = !app.mediaAvailable.video;
-  elements.toggleCameraBtn.className = `round-action ${app.mediaAvailable.video ? (app.mediaEnabled.video ? 'active' : 'off') : 'unavailable'}`;
-  elements.toggleCameraBtn.querySelector('svg').innerHTML = app.mediaEnabled.video ? ICONS.camera : ICONS.cameraOff;
-  elements.toggleCameraBtn.title = app.mediaAvailable.video ? (app.mediaEnabled.video ? 'Turn camera off' : 'Turn camera on') : 'No camera is active in this session';
-  elements.toggleCameraBtn.setAttribute('aria-label', elements.toggleCameraBtn.title);
-
+  updateMediaActionButton(elements.toggleMicBtn, 'audio');
+  updateMediaActionButton(elements.toggleCameraBtn, 'video');
   elements.localVideoCard.classList.toggle('has-video', app.mediaEnabled.video && app.mediaAvailable.video);
   elements.localMicState.classList.toggle('off', !app.mediaEnabled.audio);
   elements.localModeLabel.textContent = effectiveMediaLabel();
   const self = app.participants.get(app.selfId);
   if (self) self.media = { ...app.mediaEnabled };
   if (broadcast) sendSocket({ type: 'media-state', media: app.mediaEnabled });
+  if (app.roomCode) chrome.storage.local.set({
+    apsMediaIntent: app.mediaIntent,
+    apsMediaMode: deriveMediaMode(app.mediaIntent),
+    apsActiveRoom: {
+      roomCode: app.roomCode,
+      displayName: app.profile.displayName,
+      mediaMode: deriveMediaMode(app.mediaIntent),
+      media: { ...app.mediaEnabled },
+      updatedAt: Date.now(),
+      expiresAt: Date.now() + 8 * 60 * 60 * 1000
+    }
+  });
   renderPeople();
 }
 
-function toggleMicrophone() {
-  if (!app.mediaAvailable.audio) return toast('No microphone is active. Rejoin with Audio enabled after connecting a microphone.', 'error');
+function updateMediaActionButton(button, kind) {
+  const available = app.mediaAvailable[kind];
+  const enabled = app.mediaEnabled[kind];
+  button.disabled = false;
+  button.classList.toggle('active', available && enabled);
+  button.classList.toggle('off', available && !enabled);
+  button.classList.toggle('unavailable', !available);
+  button.classList.toggle('add-device', !available);
+  button.querySelector('svg').innerHTML = kind === 'audio' ? (enabled ? ICONS.mic : ICONS.micOff) : (enabled ? ICONS.camera : ICONS.cameraOff);
+  const label = kind === 'audio' ? 'microphone' : 'camera';
+  button.title = !available ? `Connect or start ${label}` : enabled ? `Turn ${label} off` : `Turn ${label} on`;
+  button.setAttribute('aria-label', button.title);
+}
+
+async function toggleMicrophone() {
+  if (!app.mediaAvailable.audio) {
+    try { await activateMediaKind('audio'); }
+    catch (error) { toast(describeMediaError(error), 'error'); }
+    return;
+  }
   app.mediaEnabled.audio = !app.mediaEnabled.audio;
+  app.mediaIntent.audio = app.mediaEnabled.audio;
+  app.mediaMode = deriveMediaMode(app.mediaIntent);
+  await chrome.storage.local.set({ apsMediaIntent: app.mediaIntent, apsMediaMode: app.mediaMode });
   applyLocalMediaState();
 }
 
-function toggleCamera() {
-  if (!app.mediaAvailable.video) return toast('No camera is active. Rejoin with Video enabled after connecting a camera.', 'error');
+async function toggleCamera() {
+  if (!app.mediaAvailable.video) {
+    try { await activateMediaKind('video'); }
+    catch (error) { toast(describeMediaError(error), 'error'); }
+    return;
+  }
   app.mediaEnabled.video = !app.mediaEnabled.video;
+  app.mediaIntent.video = app.mediaEnabled.video;
+  app.mediaMode = deriveMediaMode(app.mediaIntent);
+  await chrome.storage.local.set({ apsMediaIntent: app.mediaIntent, apsMediaMode: app.mediaMode });
   applyLocalMediaState();
 }
 
@@ -685,16 +1032,20 @@ function getOrCreatePeer(peerId) {
   }
   if (!localKinds.has('audio')) pc.addTransceiver('audio', { direction: 'recvonly' });
   if (!localKinds.has('video')) pc.addTransceiver('video', { direction: 'recvonly' });
+  if (app.localScreenStream?.active) {
+    const senders = [];
+    for (const track of app.localScreenStream.getTracks()) senders.push(pc.addTrack(track, app.localScreenStream));
+    app.screenSenders.set(peerId, senders);
+  }
 
   pc.onicecandidate = (event) => {
     if (event.candidate) sendSocket({ type: 'signal', targetId: peerId, signal: { candidate: event.candidate } });
   };
 
+  pc.onnegotiationneeded = () => schedulePeerNegotiation(peerId);
+
   pc.ontrack = (event) => {
-    const remoteStream = event.streams[0] || app.remoteStreams.get(peerId) || new MediaStream();
-    if (!event.streams[0]) remoteStream.addTrack(event.track);
-    app.remoteStreams.set(peerId, remoteStream);
-    attachRemoteStream(peerId, remoteStream);
+    registerRemotePeerTrack(peerId, event);
   };
 
   pc.onconnectionstatechange = () => {
@@ -709,6 +1060,16 @@ function getOrCreatePeer(peerId) {
   };
 
   return pc;
+}
+
+
+function schedulePeerNegotiation(peerId) {
+  clearTimeout(app.negotiationTimers.get(peerId));
+  const timer = setTimeout(() => {
+    app.negotiationTimers.delete(peerId);
+    createPeerOffer(peerId).catch((error) => console.warn('APS renegotiation failed', error));
+  }, 120);
+  app.negotiationTimers.set(peerId, timer);
 }
 
 async function createPeerOffer(peerId, iceRestart = false) {
@@ -767,7 +1128,9 @@ function attachRemoteStream(peerId, stream) {
       <div class="video-meta"><span class="peer-name">${escapeHtml(participant.name)}</span><span class="mini-status"></span></div>`;
     elements.videoGrid.appendChild(card);
   }
-  card.querySelector('video').srcObject = stream;
+  const remoteVideo = card.querySelector('video');
+  remoteVideo.srcObject = stream;
+  if (app.devicePreferences.audiooutput && typeof remoteVideo.setSinkId === 'function') remoteVideo.setSinkId(app.devicePreferences.audiooutput).catch(() => undefined);
   card.classList.toggle('has-video', participant.media?.video !== false && stream.getVideoTracks().some((t) => t.readyState === 'live'));
   card.querySelector('.mini-status').classList.toggle('off', participant.media?.audio === false);
 }
@@ -989,6 +1352,7 @@ function updateParticipantUI() {
   const count = app.participants.size || 1;
   elements.participantCount.textContent = `${count} participant${count === 1 ? '' : 's'}`;
   elements.peopleCountPill.textContent = String(count);
+  elements.videoGrid.dataset.count = String(Math.min(count, 4));
   renderPeople();
 }
 
@@ -1075,8 +1439,185 @@ function setTab(tab) {
   }
 }
 
+
+function registerRemotePeerTrack(peerId, event) {
+  const registry = app.peerStreamRegistry.get(peerId) || new Map();
+  let stream = event.streams?.[0];
+  if (!stream) {
+    stream = registry.get(`fallback-${event.track.kind}`) || new MediaStream();
+    if (!stream.getTracks().some((track) => track.id === event.track.id)) stream.addTrack(event.track);
+  }
+  registry.set(stream.id || `fallback-${event.track.kind}`, stream);
+  app.peerStreamRegistry.set(peerId, registry);
+  event.track.addEventListener('ended', () => reconcilePeerStreams(peerId), { once: true });
+  reconcilePeerStreams(peerId);
+}
+
+function reconcilePeerStreams(peerId) {
+  const registry = app.peerStreamRegistry.get(peerId) || new Map();
+  let cameraStream = null;
+  let screenStream = null;
+  for (const stream of registry.values()) {
+    if (isScreenShareStream(peerId, stream.id, app.screenShare)) screenStream = stream;
+    else if (!cameraStream || stream.getAudioTracks().length + stream.getVideoTracks().length > cameraStream.getTracks().length) cameraStream = stream;
+  }
+  if (cameraStream) {
+    app.remoteStreams.set(peerId, cameraStream);
+    attachRemoteStream(peerId, cameraStream);
+  }
+  if (screenStream) app.remoteScreenStreams.set(peerId, screenStream);
+  else app.remoteScreenStreams.delete(peerId);
+  updateScreenShareUI();
+}
+
+async function toggleScreenShare() {
+  if (app.localScreenStream) {
+    await stopScreenShare(true);
+    return;
+  }
+  if (app.screenShare.active && app.screenShare.presenterId !== app.selfId) {
+    toast(`${app.screenShare.presenterName || 'A friend'} is already presenting.`, 'error');
+    return;
+  }
+  await startScreenShare();
+}
+
+async function startScreenShare() {
+  if (app.screenOperation || !app.roomCode) return;
+  if (!navigator.mediaDevices?.getDisplayMedia) {
+    toast('Screen sharing is unavailable in this Chrome version.', 'error');
+    return;
+  }
+  app.screenOperation = true;
+  updateScreenShareButton();
+  try {
+    const stream = await navigator.mediaDevices.getDisplayMedia({
+      video: { frameRate: { ideal: 15, max: 30 } },
+      audio: true,
+      selfBrowserSurface: 'exclude',
+      surfaceSwitching: 'include',
+      systemAudio: 'include'
+    });
+    const videoTrack = stream.getVideoTracks()[0];
+    if (!videoTrack) throw new Error('No screen was selected.');
+    videoTrack.contentHint = 'detail';
+    app.localScreenStream = stream;
+    app.screenShare = {
+      active: true,
+      presenterId: app.selfId,
+      presenterName: app.profile.displayName || 'You',
+      streamId: stream.id
+    };
+    app.screenViewHidden = false;
+    videoTrack.addEventListener('ended', () => stopScreenShare(true), { once: true });
+    for (const [peerId, pc] of app.peerConnections) {
+      const senders = [];
+      for (const track of stream.getTracks()) senders.push(pc.addTrack(track, stream));
+      app.screenSenders.set(peerId, senders);
+      schedulePeerNegotiation(peerId);
+    }
+    sendSocket({ type: 'screen-share-state', active: true, streamId: stream.id });
+    updateScreenShareUI();
+    toast('Screen sharing started. Choose a normal tab, window or screen; protected OTT video may appear blank.', 'success');
+  } catch (error) {
+    if (error?.name !== 'NotAllowedError' && error?.name !== 'AbortError') toast(error?.message || 'Could not start screen sharing.', 'error');
+  } finally {
+    app.screenOperation = false;
+    updateScreenShareButton();
+  }
+}
+
+async function stopScreenShare(notifyServer = true) {
+  if (app.stoppingScreenShare) return;
+  app.stoppingScreenShare = true;
+  const stream = app.localScreenStream;
+  app.localScreenStream = null;
+  for (const [peerId, senders] of app.screenSenders) {
+    const pc = app.peerConnections.get(peerId);
+    if (pc) {
+      for (const sender of senders) {
+        try { pc.removeTrack(sender); } catch { /* Peer may be closing. */ }
+      }
+      schedulePeerNegotiation(peerId);
+    }
+  }
+  app.screenSenders.clear();
+  stream?.getTracks().forEach((track) => track.stop());
+  if (app.screenShare.presenterId === app.selfId) app.screenShare = inactiveScreenShare();
+  if (notifyServer && app.roomCode) sendSocket({ type: 'screen-share-state', active: false });
+  updateScreenShareUI();
+  app.stoppingScreenShare = false;
+}
+
+function handleScreenShareState(nextState, announce = true) {
+  const previous = app.screenShare;
+  app.screenShare = nextState?.active ? {
+    active: true,
+    presenterId: String(nextState.presenterId || ''),
+    presenterName: String(nextState.presenterName || 'Friend'),
+    streamId: String(nextState.streamId || '')
+  } : inactiveScreenShare();
+  if (!app.screenShare.active && previous.presenterId === app.selfId && app.localScreenStream) stopScreenShare(false);
+  if (app.screenShare.active) reconcilePeerStreams(app.screenShare.presenterId);
+  else app.remoteScreenStreams.clear();
+  updateScreenShareUI();
+  if (announce && previous.active !== app.screenShare.active) {
+    toast(app.screenShare.active ? `${app.screenShare.presenterName} started sharing a screen.` : 'Screen sharing stopped.', 'success');
+  }
+}
+
+function currentScreenStream() {
+  if (!app.screenShare.active) return null;
+  if (app.screenShare.presenterId === app.selfId) return app.localScreenStream;
+  return app.remoteScreenStreams.get(app.screenShare.presenterId) || null;
+}
+
+function toggleScreenView() {
+  if (!app.screenShare.active) return;
+  app.screenViewHidden = !app.screenViewHidden;
+  chrome.storage.local.set({ apsScreenViewPreferences: { hidden: app.screenViewHidden } });
+  updateScreenShareUI();
+}
+
+function updateScreenShareButton() {
+  const button = elements.screenShareBtn;
+  const local = Boolean(app.localScreenStream);
+  const blocked = app.screenShare.active && app.screenShare.presenterId !== app.selfId;
+  button.classList.toggle('sharing', local);
+  button.classList.toggle('blocked', blocked);
+  button.disabled = app.screenOperation;
+  button.querySelector('span').textContent = local ? 'Stop' : blocked ? 'In use' : 'Share';
+  button.title = local ? 'Stop sharing your screen' : blocked ? `${app.screenShare.presenterName || 'A friend'} is presenting` : 'Share a tab, window or screen';
+  button.setAttribute('aria-label', button.title);
+}
+
+function updateScreenShareUI() {
+  const active = Boolean(app.screenShare.active);
+  const stream = currentScreenStream();
+  const hidden = active && app.screenViewHidden;
+  elements.screenStage.hidden = !active || hidden;
+  elements.screenHiddenBar.hidden = !active || !hidden;
+  elements.videoGrid.classList.toggle('screen-active', active && !hidden);
+  elements.screenPresenterName.textContent = active ? `${app.screenShare.presenterName || 'Friend'} is presenting` : 'Screen share';
+  elements.screenHiddenText.textContent = active ? `${app.screenShare.presenterName || 'Friend'} is presenting` : 'Screen share hidden';
+  elements.screenStatusText.textContent = app.screenShare.presenterId === app.selfId ? 'You are sharing · visible to the room' : stream ? 'Live screen share' : 'Connecting securely…';
+  elements.screenStopBtn.hidden = app.screenShare.presenterId !== app.selfId;
+  elements.screenViewToggleBtn.textContent = hidden ? 'Show' : 'Hide';
+  if (elements.screenVideo.srcObject !== stream) {
+    elements.screenVideo.srcObject = stream;
+    elements.screenVideo.muted = app.screenShare.presenterId === app.selfId;
+    if (stream) elements.screenVideo.play().catch(() => undefined);
+  }
+  elements.screenStage.classList.toggle('has-stream', Boolean(stream?.getVideoTracks().some((track) => track.readyState === 'live')));
+  updateScreenShareButton();
+}
+
 async function startCinemaMode() {
   if (!app.roomCode || app.cinemaStarting) return;
+  if (app.localScreenStream) {
+    await stopScreenShare(true);
+    toast('Screen sharing stopped for the Cinema handoff. You can start it again in Cinema Mode.', 'success');
+  }
   app.cinemaStarting = true;
   elements.cinemaModeBtn.disabled = true;
   elements.cinemaModeBtn.querySelector('span').textContent = 'Opening…';
@@ -1124,18 +1665,48 @@ async function completeCinemaHandoff() {
   }
 }
 
-async function copyInvite() {
+async function copyRoomCode() {
   const code = formatRoomCode(app.roomCode);
   try {
-    await navigator.clipboard.writeText(`Join my APS Watch Together room: ${code}`);
+    await navigator.clipboard.writeText(code);
     toast('Room code copied.', 'success');
   } catch {
     toast(`Room code: ${code}`);
   }
 }
 
+async function shareRoomInvite() {
+  if (!app.roomCode) return;
+  let inviteUrl;
+  try {
+    inviteUrl = buildRoomInviteUrl(app.settings.serverUrl, app.roomCode);
+  } catch (error) {
+    toast(error?.message || 'Could not create the invite link.', 'error');
+    return;
+  }
+  const title = 'Join my APS Watch Together room';
+  const text = `Join my private APS Watch Together room. Room code: ${formatRoomCode(app.roomCode)}`;
+  try {
+    if (navigator.share) {
+      await navigator.share({ title, text, url: inviteUrl });
+      toast('Invite shared.', 'success');
+      return;
+    }
+  } catch (error) {
+    if (error?.name === 'AbortError') return;
+  }
+  try {
+    await navigator.clipboard.writeText(`${text}
+${inviteUrl}`);
+    toast('Direct room link copied.', 'success');
+  } catch {
+    toast(inviteUrl);
+  }
+}
+
 function leaveRoom() {
   app.intentionallyLeft = true;
+  stopScreenShare(false);
   sendSocket({ type: 'leave-room' });
   app.socket?.close();
   clearInterval(app.heartbeatTimer);
@@ -1147,6 +1718,11 @@ function leaveRoom() {
   for (const pc of app.peerConnections.values()) pc.close();
   app.peerConnections.clear();
   app.remoteStreams.clear();
+  app.remoteScreenStreams.clear();
+  app.peerStreamRegistry.clear();
+  app.screenSenders.clear();
+  app.screenShare = inactiveScreenShare();
+  updateScreenShareUI();
   document.querySelectorAll('[data-peer-card]').forEach((node) => node.remove());
   chrome.storage.local.remove(['apsActiveRoom', 'apsRestoreRoom']);
   setView('setup');

@@ -32,7 +32,9 @@ chrome.runtime.onInstalled.addListener(async ({ reason }) => {
 
   const current = await chrome.storage.local.get([
     'apsSettings',
-    'apsProfile'
+    'apsProfile',
+    'apsMediaIntent',
+    'apsDevicePreferences'
   ]);
 
   if (!current.apsSettings) {
@@ -58,9 +60,14 @@ chrome.runtime.onInstalled.addListener(async ({ reason }) => {
         displayName: '',
         avatarSeed: crypto.randomUUID()
       },
-      apsMediaMode: 'av'
+      apsMediaMode: 'av',
+      apsMediaIntent: { audio: true, video: true },
+      apsDevicePreferences: { audioinput: '', videoinput: '', audiooutput: '' }
     });
   }
+
+  if (!current.apsMediaIntent) await chrome.storage.local.set({ apsMediaIntent: { audio: true, video: true } });
+  if (!current.apsDevicePreferences) await chrome.storage.local.set({ apsDevicePreferences: { audioinput: '', videoinput: '', audiooutput: '' } });
 
   if (reason === 'install') {
     await chrome.tabs.create({ url: chrome.runtime.getURL('welcome.html') });
@@ -98,6 +105,34 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ ok: false, tabId: tab.id, error: error?.message || 'Player bridge unavailable.' });
       }
     });
+    return true;
+  }
+
+  if (message?.type === 'APS_OPEN_INVITE') {
+    (async () => {
+      try {
+        const roomCode = String(message.roomCode || '').replace(/[^A-Z2-9]/gi, '').replace(/[01IO]/gi, '').slice(0, 8).toUpperCase();
+        if (roomCode.length !== 8) throw new Error('The invite link has an invalid room code.');
+        await chrome.storage.local.set({
+          apsPendingInvite: {
+            roomCode,
+            inviteUrl: String(message.inviteUrl || ''),
+            requestedAt: Date.now(),
+            expiresAt: Date.now() + 10 * 60 * 1000
+          }
+        });
+        const supported = await findSupportedTab();
+        const target = supported || sender.tab;
+        if (!target?.id) throw new Error('Could not find a Chrome tab for APS.');
+        await chrome.sidePanel.setOptions({ tabId: target.id, path: 'sidepanel.html', enabled: true });
+        if (target.windowId) await chrome.windows.update(target.windowId, { focused: true });
+        await chrome.tabs.update(target.id, { active: true });
+        await chrome.sidePanel.open({ tabId: target.id });
+        sendResponse({ ok: true, tabId: target.id });
+      } catch (error) {
+        sendResponse({ ok: false, error: error?.message || 'Could not open the room invitation.' });
+      }
+    })();
     return true;
   }
 

@@ -200,6 +200,15 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (url.pathname.startsWith('/join/')) {
+    const roomCode = normalizeCode(url.pathname.slice('/join/'.length));
+    const room = rooms.get(roomCode);
+    res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
+    res.writeHead(roomCode.length === 8 ? 200 : 400, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(renderJoinPage(roomCode, room));
+    return;
+  }
+
   res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
   res.end('APS Watch Together room service is online.');
 });
@@ -297,6 +306,9 @@ function handleMessage(client, message) {
     case 'media-state':
       relayMediaState(client, message);
       break;
+    case 'screen-share-state':
+      relayScreenShareState(client, message);
+      break;
     case 'ping':
       send(client, { type: 'pong', at: message.at, serverTime: Date.now() });
       break;
@@ -319,7 +331,8 @@ function createRoom(client) {
     createdAt: Date.now(),
     lastActivityAt: Date.now(),
     emptyAt: null,
-    lastPlayback: null
+    lastPlayback: null,
+    screenShare: inactiveScreenShare()
   };
   rooms.set(roomCode, room);
   room.clients.set(client.id, client);
@@ -364,6 +377,11 @@ function leaveRoom(client, graceful = true) {
   room.clients.delete(client.id);
   client.roomCode = '';
   room.lastActivityAt = Date.now();
+
+  if (room.screenShare?.presenterId === client.id) {
+    room.screenShare = inactiveScreenShare();
+    broadcast(room, { type: 'screen-share-state', screenShare: room.screenShare });
+  }
 
   if (wasHost && room.clients.size > 0) {
     if (graceful) {
@@ -460,6 +478,34 @@ function relayMediaState(client, message) {
   broadcast(room, { type: 'media-state', participantId: client.id, media: client.media });
 }
 
+function relayScreenShareState(client, message) {
+  const room = getClientRoom(client);
+  if (!room) return sendError(client, 'Join a room before sharing your screen.');
+  const active = Boolean(message.active);
+  if (active) {
+    if (room.screenShare?.active && room.screenShare.presenterId !== client.id) {
+      const presenter = room.clients.get(room.screenShare.presenterId);
+      return sendError(client, `${presenter?.name || 'Another participant'} is already presenting a screen.`);
+    }
+    const streamId = cleanStreamId(message.streamId);
+    if (!streamId) return sendError(client, 'The screen-share stream is invalid.');
+    room.screenShare = {
+      active: true,
+      presenterId: client.id,
+      presenterName: client.name,
+      streamId,
+      startedAt: Date.now()
+    };
+  } else {
+    if (room.screenShare?.active && room.screenShare.presenterId !== client.id && room.hostId !== client.id) {
+      return sendError(client, 'Only the presenter or host can stop screen sharing.');
+    }
+    room.screenShare = inactiveScreenShare();
+  }
+  room.lastActivityAt = Date.now();
+  broadcast(room, { type: 'screen-share-state', screenShare: room.screenShare });
+}
+
 function disconnectClient(client) {
   if (!clients.has(client.id)) return;
   leaveRoom(client, false);
@@ -474,6 +520,7 @@ function roomPayload(type, room, client) {
     hostId: room.hostId,
     locked: room.locked,
     everyoneCanControl: room.everyoneCanControl,
+    screenShare: room.screenShare || inactiveScreenShare(),
     participants: [...room.clients.values()].map(publicParticipant),
     serverTime: Date.now()
   };
@@ -517,6 +564,32 @@ function allowMessage(client) {
   if (now - client.rate.windowStartedAt > 10_000) client.rate = { windowStartedAt: now, count: 0 };
   client.rate.count += 1;
   return client.rate.count <= 150;
+}
+
+function inactiveScreenShare() {
+  return { active: false, presenterId: '', presenterName: '', streamId: '', startedAt: 0 };
+}
+
+function cleanStreamId(value) {
+  const clean = String(value || '').replace(/[^a-zA-Z0-9_+./:-]/g, '').slice(0, 160);
+  return clean.length >= 4 ? clean : '';
+}
+
+function formatRoomCode(value) {
+  const code = normalizeCode(value);
+  return code.length > 4 ? `${code.slice(0, 4)}-${code.slice(4)}` : code;
+}
+
+function renderJoinPage(roomCode, room) {
+  const valid = roomCode.length === 8;
+  const formatted = valid ? formatRoomCode(roomCode) : 'INVALID';
+  const live = Boolean(room);
+  const status = live ? `${room.clients.size} participant${room.clients.size === 1 ? '' : 's'} currently in the room` : 'The host may not have opened this room yet';
+  const buttonLabel = valid ? 'Open APS and join room' : 'Invalid invitation';
+  return `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Join APS Watch Together</title>
+<style>:root{color-scheme:dark;--bg:#070b14;--card:#111827;--line:rgba(148,163,184,.18);--text:#f8fafc;--muted:#94a3b8;--purple:#8b5cf6;--cyan:#22d3ee;--green:#34d399}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:22px;background:radial-gradient(circle at 15% 0,rgba(139,92,246,.25),transparent 34%),radial-gradient(circle at 95% 10%,rgba(34,211,238,.13),transparent 30%),var(--bg);font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--text)}main{width:min(520px,100%);padding:31px;border:1px solid var(--line);border-radius:28px;background:rgba(17,24,39,.92);box-shadow:0 26px 80px rgba(0,0,0,.38)}.brand{display:flex;align-items:center;gap:12px}.mark{width:46px;height:46px;display:grid;place-items:center;border-radius:15px;background:linear-gradient(135deg,var(--purple),#0891b2);font-size:21px;box-shadow:0 12px 30px rgba(139,92,246,.3)}.brand strong{display:block}.brand small{display:block;margin-top:3px;color:var(--muted)}h1{margin:28px 0 9px;font-size:33px;line-height:1.08;letter-spacing:-.045em}h1 span{background:linear-gradient(90deg,#c4b5fd,#67e8f9);color:transparent;background-clip:text;-webkit-background-clip:text}p{color:#cbd5e1;line-height:1.55}.code{margin:20px 0;padding:17px;border:1px solid rgba(34,211,238,.22);border-radius:17px;background:rgba(34,211,238,.06);text-align:center}.code small{display:block;color:var(--muted);font-size:10px;letter-spacing:.1em}.code strong{display:block;margin-top:5px;font-size:26px;letter-spacing:.14em}.status{display:flex;align-items:center;justify-content:center;gap:7px;margin-top:8px;color:${live ? '#a7f3d0' : '#fde68a'};font-size:11px}.status i{width:7px;height:7px;border-radius:50%;background:currentColor}button{width:100%;height:49px;border:0;border-radius:14px;background:linear-gradient(135deg,var(--purple),#0891b2);color:white;font:inherit;font-weight:800;cursor:${valid ? 'pointer' : 'not-allowed'};box-shadow:0 14px 32px rgba(139,92,246,.25)}button:disabled{opacity:.45}.help{margin:14px 0 0;text-align:center;color:var(--muted);font-size:10px;line-height:1.5}.privacy{margin-top:20px;padding-top:16px;border-top:1px solid var(--line);color:#718096;font-size:10px}</style></head>
+<body><main><div class="brand"><div class="mark">▶</div><div><strong>APS Watch Together</strong><small>Private synchronized movie night</small></div></div><h1>You’re invited to<br><span>watch together.</span></h1><p>Open the APS extension and join the private room. You can also enter the room code manually.</p><div class="code"><small>ROOM CODE</small><strong>${formatted}</strong><div class="status"><i></i>${status}</div></div><button type="button" data-aps-open-room ${valid ? '' : 'disabled'}>${buttonLabel}</button><p class="help" data-aps-extension-status>If nothing opens, install APS Watch Together in Chrome, refresh this page, or enter the code manually.</p><p class="privacy">Each participant watches through their own OTT account. APS synchronizes playback and peer-to-peer calling; it does not retransmit the movie.</p></main></body></html>`;
 }
 
 function cleanSessionId(value) {

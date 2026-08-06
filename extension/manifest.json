@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "APS Watch Together",
   "short_name": "APS Watch",
-  "version": "1.3.0",
-  "description": "Private synchronized watch rooms with flexible video, audio and watch-only participation modes.",
+  "version": "1.5.1",
+  "description": "Private synchronized watch rooms with stable Prime Video controls, screen sharing, direct invite links, modern camera layouts and hot-swappable call devices.",
   "minimum_chrome_version": "141",
   "permissions": [
     "storage",
@@ -17,7 +17,8 @@
     "https://*.amazon.co.uk/*",
     "https://*.amazon.in/*",
     "https://*.amazon.com.au/*",
-    "https://*.zee5.com/*"
+    "https://*.zee5.com/*",
+    "http://localhost:8787/*"
   ],
   "background": {
     "service_worker": "background.js",
@@ -54,6 +55,20 @@
     },
     {
       "matches": [
+        "https://*.primevideo.com/*",
+        "https://*.amazon.com/*",
+        "https://*.amazon.co.uk/*",
+        "https://*.amazon.in/*",
+        "https://*.amazon.com.au/*"
+      ],
+      "js": [
+        "prime-bridge.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
         "https://*.netflix.com/*",
         "https://*.primevideo.com/*",
         "https://*.amazon.com/*",
@@ -64,6 +79,15 @@
       ],
       "js": [
         "content.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "http://localhost:8787/join/*"
+      ],
+      "js": [
+        "invite.js"
       ],
       "run_at": "document_idle"
     }

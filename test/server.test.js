@@ -241,3 +241,40 @@ test('hands host control from full panel to Cinema Mode without transferring to 
   cinema.close();
   guest.close();
 });
+
+test('allows one screen presenter at a time and releases presentation on stop', async () => {
+  const host = await connect('Screen Host', 'screen-host-session-123456');
+  const guest = await connect('Screen Guest', 'screen-guest-session-123456');
+
+  const createdPromise = waitForMessage(host, 'room-created');
+  host.send(JSON.stringify({ type: 'create-room' }));
+  const created = await createdPromise;
+
+  const joinedPromise = waitForMessage(guest, 'room-joined');
+  guest.send(JSON.stringify({ type: 'join-room', roomCode: created.roomCode }));
+  await joinedPromise;
+
+  const startedForGuest = waitForMessage(guest, 'screen-share-state');
+  host.send(JSON.stringify({ type: 'screen-share-state', active: true, streamId: 'screen-stream-host-1' }));
+  const started = await startedForGuest;
+  assert.equal(started.screenShare.active, true);
+  assert.equal(started.screenShare.presenterName, 'Screen Host');
+
+  const deniedPromise = waitForMessage(guest, 'error');
+  guest.send(JSON.stringify({ type: 'screen-share-state', active: true, streamId: 'guest-screen-stream' }));
+  const denied = await deniedPromise;
+  assert.match(denied.message, /already presenting/i);
+
+  const stoppedForGuest = waitForMessage(guest, 'screen-share-state');
+  host.send(JSON.stringify({ type: 'screen-share-state', active: false }));
+  const stopped = await stoppedForGuest;
+  assert.equal(stopped.screenShare.active, false);
+
+  const guestStartedForHost = waitForMessage(host, 'screen-share-state');
+  guest.send(JSON.stringify({ type: 'screen-share-state', active: true, streamId: 'guest-screen-stream-2' }));
+  const guestStarted = await guestStartedForHost;
+  assert.equal(guestStarted.screenShare.active, true);
+
+  host.close();
+  guest.close();
+});

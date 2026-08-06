@@ -51,7 +51,7 @@ async function save() {
     iceServers
   };
   await chrome.storage.local.set({ apsSettings: settings });
-  show('Settings saved. Rejoin the room to apply call changes.');
+  show('Settings saved. In a room, open Devices to switch camera, microphone, speakers or quality immediately.');
 }
 
 async function reset() {

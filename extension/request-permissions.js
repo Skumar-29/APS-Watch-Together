@@ -10,7 +10,9 @@ const MODES = {
   video: { title: 'Allow camera', button: 'Allow camera', audio: false, video: true },
   watch: { title: 'Watch only mode', button: 'Continue', audio: false, video: false }
 };
-const mode = MODES[new URLSearchParams(location.search).get('mode')] ? new URLSearchParams(location.search).get('mode') : 'av';
+const params = new URLSearchParams(location.search);
+const mode = MODES[params.get('mode')] ? params.get('mode') : 'av';
+const purpose = params.get('purpose') === 'activate' ? 'activate' : 'join';
 const requested = MODES[mode];
 title.textContent = requested.title;
 allowBtn.textContent = requested.button;
@@ -40,9 +42,11 @@ async function requestKind(kind) {
 }
 
 async function finish(nextMode = mode) {
-  await chrome.storage.local.set({ apsMediaPermissionGrantedAt: Date.now(), apsMediaMode: nextMode });
-  await chrome.runtime.sendMessage({ type: 'APS_MEDIA_PERMISSION_GRANTED', mediaMode: nextMode }).catch(() => undefined);
-  setStatus(nextMode === 'watch' ? 'Watch only selected. Returning to APS Watch Together…' : 'Permission granted. Returning to APS Watch Together…', 'success');
+  const update = { apsMediaPermissionGrantedAt: Date.now() };
+  if (purpose === 'join') update.apsMediaMode = nextMode;
+  await chrome.storage.local.set(update);
+  await chrome.runtime.sendMessage({ type: 'APS_MEDIA_PERMISSION_GRANTED', mediaMode: nextMode, purpose, cancelled: purpose === 'activate' && nextMode === 'watch' }).catch(() => undefined);
+  setStatus(nextMode === 'watch' ? (purpose === 'activate' ? 'No device was started. Returning to APS Watch Together…' : 'Watch only selected. Returning to APS Watch Together…') : 'Permission granted. Returning to APS Watch Together…', 'success');
   setTimeout(() => window.close(), 900);
 }
 

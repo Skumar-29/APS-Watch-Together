@@ -30,6 +30,12 @@
       </div>
     </section>
 
+    <section id="cinemaScreenStage" class="cinema-screen-stage" hidden>
+      <div class="cinema-screen-head"><div><span class="share-live-dot"></span><strong id="cinemaScreenPresenter">Screen share</strong><small id="cinemaScreenStatus">Connecting…</small></div><button id="cinemaScreenToggleBtn" type="button">Hide</button></div>
+      <div class="cinema-screen-canvas"><video id="cinemaScreenVideo" autoplay playsinline></video><div id="cinemaScreenFallback"><span>▣</span><strong>Connecting to shared screen…</strong></div></div>
+    </section>
+    <button id="cinemaScreenHiddenBar" class="cinema-screen-hidden" type="button" hidden><span class="share-live-dot"></span><strong id="cinemaScreenHiddenText">Screen share hidden</strong><small>Show</small></button>
+
     <section id="cameraStage" class="camera-stage show-self show-friends" aria-live="polite">
       <article class="camera-card self-card" id="selfCard" data-view-card="self">
         <video id="localVideo" autoplay muted playsinline></video>
@@ -57,10 +63,16 @@
 
     <div class="controls">
       <button id="micBtn" class="circle-btn active" type="button" title="Mute microphone" aria-label="Mute microphone">
-        <svg viewBox="0 0 24 24"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.9V22h2v-3.1A7 7 0 0 0 19 12h-2Z"/></svg>
+        <svg viewBox="0 0 24 24"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.9V22h2v-3.1A7 7 0 0 0 19 12h-2Z"/></svg><span class="action-badge">+</span>
       </button>
       <button id="cameraBtn" class="circle-btn active" type="button" title="Turn camera off" aria-label="Turn camera off">
-        <svg viewBox="0 0 24 24"><path d="M4 5h11a2 2 0 0 1 2 2v2.2l4-2.5v10.6l-4-2.5V17a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/></svg>
+        <svg viewBox="0 0 24 24"><path d="M4 5h11a2 2 0 0 1 2 2v2.2l4-2.5v10.6l-4-2.5V17a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/></svg><span class="action-badge">+</span>
+      </button>
+      <button id="shareScreenBtn" class="circle-btn share-circle" type="button" title="Share screen" aria-label="Share screen">
+        <svg viewBox="0 0 24 24"><path d="M3 4h18v13H3V4Zm2 2v9h14V6H5Zm6 12h2v2h4v2H7v-2h4v-2Zm1-10 4 4h-3v2h-2v-2H8l4-4Z"/></svg>
+      </button>
+      <button id="devicesBtn" class="circle-btn" type="button" title="Call device settings" aria-label="Call device settings">
+        <svg viewBox="0 0 24 24"><path d="M4 7h9v2H4V7Zm0 8h5v2H4v-2Zm12-9h4v4h-4V9h-1V7h1V6Zm-4 8h8v2h-8v1h-2v-4h2v1Z"/></svg>
       </button>
       <button id="floatBtn" class="wide-btn" type="button" title="Open a movable always-on-top camera window">
         <svg viewBox="0 0 24 24"><path d="M4 4h16v12H4V4Zm2 2v8h12V6H6Zm3 12h6v2H9v-2Z"/></svg>
@@ -71,6 +83,15 @@
         Full controls
       </button>
     </div>
+
+    <section id="cinemaDevicePanel" class="cinema-device-panel" hidden>
+      <div class="cinema-device-header"><div><strong>Call devices</strong><span>Change devices without leaving</span></div><button id="closeDevicesBtn" type="button">×</button></div>
+      <label><span>Camera</span><select id="cinemaCameraSelect"><option value="">Automatic camera</option></select></label>
+      <label><span>Microphone</span><select id="cinemaMicSelect"><option value="">Automatic microphone</option></select></label>
+      <label id="cinemaSpeakerField"><span>Speaker</span><select id="cinemaSpeakerSelect"><option value="">System default</option></select></label>
+      <div class="cinema-device-actions"><button id="cinemaRefreshDevicesBtn" type="button">Refresh</button><button id="cinemaApplyDevicesBtn" type="button">Apply</button></div>
+      <p id="cinemaDeviceStatus">Connect a device at any time; APS will detect it.</p>
+    </section>
 
     <button id="leaveBtn" class="leave-btn" type="button">Leave room</button>
     <p id="hint" class="hint">Show Me, Friends or both. Float call stays above the movie and can be dragged anywhere.</p>

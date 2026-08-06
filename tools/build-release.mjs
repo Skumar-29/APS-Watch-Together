@@ -30,6 +30,20 @@ for (const relative of ['background.js', 'options.js']) {
   fs.writeFileSync(file, changed);
 }
 
+const manifestFile = path.join(target, 'manifest.json');
+const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+const server = new URL(serverUrl);
+server.protocol = server.protocol === 'wss:' ? 'https:' : 'http:';
+const inviteOriginPattern = `${server.origin}/*`;
+const inviteJoinPattern = `${server.origin}/join/*`;
+manifest.host_permissions = manifest.host_permissions.filter((pattern) => !/^http:\/\/localhost(?::\d+)?\//i.test(pattern));
+if (!manifest.host_permissions.includes(inviteOriginPattern)) manifest.host_permissions.push(inviteOriginPattern);
+const inviteScript = manifest.content_scripts.find((entry) => entry.js?.includes('invite.js'));
+if (!inviteScript) throw new Error('Invite content script is missing from manifest.json');
+inviteScript.matches = inviteScript.matches.filter((pattern) => !/^http:\/\/localhost(?::\d+)?\//i.test(pattern));
+if (!inviteScript.matches.includes(inviteJoinPattern)) inviteScript.matches.push(inviteJoinPattern);
+fs.writeFileSync(manifestFile, JSON.stringify(manifest, null, 2) + '\n');
+
 const releaseInfo = {
   builtAt: new Date().toISOString(),
   serverUrl,

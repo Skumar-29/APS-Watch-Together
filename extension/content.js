@@ -14,7 +14,14 @@
     netflixBridgeStatus: null,
     netflixBridgeStatusAt: 0,
     netflixBridgePending: new Map(),
-    netflixBridgePollBusy: false
+    netflixBridgePollBusy: false,
+    primeBridgeStatus: null,
+    primeBridgeStatusAt: 0,
+    primeBridgePending: new Map(),
+    primeBridgePollBusy: false,
+    localEventsSuppressedUntil: Date.now() + 2500,
+    lastLocationHref: location.href,
+    lastAppliedCommandId: ''
   };
 
   const SERVICE_LABELS = {
@@ -45,6 +52,17 @@
     if (!video.paused) score *= 1.6;
     if (video.readyState >= 2) score *= 1.25;
     if (video.duration > 60) score *= 1.2;
+    if (state.service === 'prime') {
+      const duration = Number.isFinite(video.duration) ? video.duration : 0;
+      let node = video;
+      const context = [];
+      for (let depth = 0; node && depth < 6; depth += 1, node = node.parentElement) {
+        context.push(node.id || '', node.className || '', node.getAttribute?.('data-testid') || '');
+      }
+      if (duration > 300) score *= 2.2;
+      else if (duration > 0 && duration < 45) score *= 0.08;
+      if (/\b(ad|ads|advert|advertisement|preroll|promo|preview|trailer)\b/i.test(context.join(' '))) score *= 0.03;
+    }
     return score;
   }
 
@@ -107,19 +125,53 @@
     });
   }
 
+
+  function callPrimeBridge(command, timeoutMs = 2500) {
+    return new Promise((resolve) => {
+      const requestId = crypto.randomUUID();
+      const timeout = setTimeout(() => {
+        state.primeBridgePending.delete(requestId);
+        resolve({ ok: false, error: 'Prime Video player control timed out. Refresh the Prime Video tab and try again.' });
+      }, timeoutMs);
+      state.primeBridgePending.set(requestId, { resolve, timeout });
+      window.postMessage({
+        source: 'APS_WATCH_TOGETHER',
+        type: 'APS_PRIME_COMMAND',
+        requestId,
+        command
+      }, location.origin);
+    });
+  }
+
   window.addEventListener('message', (event) => {
     if (event.source !== window || event.origin !== location.origin) return;
     const data = event.data;
-    if (!data || data.source !== 'APS_NETFLIX_BRIDGE' || data.type !== 'APS_NETFLIX_RESULT') return;
-    const pending = state.netflixBridgePending.get(data.requestId);
-    if (!pending) return;
-    clearTimeout(pending.timeout);
-    state.netflixBridgePending.delete(data.requestId);
-    if (data.result?.status) {
-      state.netflixBridgeStatus = data.result.status;
-      state.netflixBridgeStatusAt = Date.now();
+    if (!data) return;
+
+    if (data.source === 'APS_NETFLIX_BRIDGE' && data.type === 'APS_NETFLIX_RESULT') {
+      const pending = state.netflixBridgePending.get(data.requestId);
+      if (!pending) return;
+      clearTimeout(pending.timeout);
+      state.netflixBridgePending.delete(data.requestId);
+      if (data.result?.status) {
+        state.netflixBridgeStatus = data.result.status;
+        state.netflixBridgeStatusAt = Date.now();
+      }
+      pending.resolve(data.result || { ok: false, error: 'Netflix player returned no result.' });
+      return;
     }
-    pending.resolve(data.result || { ok: false, error: 'Netflix player returned no result.' });
+
+    if (data.source === 'APS_PRIME_BRIDGE' && data.type === 'APS_PRIME_RESULT') {
+      const pending = state.primeBridgePending.get(data.requestId);
+      if (!pending) return;
+      clearTimeout(pending.timeout);
+      state.primeBridgePending.delete(data.requestId);
+      if (data.result?.status) {
+        state.primeBridgeStatus = data.result.status;
+        state.primeBridgeStatusAt = Date.now();
+      }
+      pending.resolve(data.result || { ok: false, error: 'Prime Video player returned no result.' });
+    }
   });
 
   function bridgeSnapshot(reason, bridgeStatus) {
@@ -156,9 +208,47 @@
     }
   }
 
+
+  function primeBridgeSnapshot(reason, bridgeStatus) {
+    return {
+      type: 'APS_PLAYER_STATUS',
+      reason,
+      service: state.service,
+      serviceLabel: SERVICE_LABELS[state.service],
+      ready: bridgeStatus?.ready !== false,
+      paused: Boolean(bridgeStatus?.paused),
+      currentTime: Number(bridgeStatus?.currentTime || 0),
+      duration: Number(bridgeStatus?.duration || 0),
+      playbackRate: Number(bridgeStatus?.playbackRate || 1),
+      muted: state.video?.muted || false,
+      volume: Number.isFinite(state.video?.volume) ? state.video.volume : 1,
+      title: getTitle(),
+      url: location.href,
+      wallClock: Date.now()
+    };
+  }
+
+  async function refreshPrimeBridgeStatus() {
+    if (state.service !== 'prime' || state.primeBridgePollBusy) return;
+    state.primeBridgePollBusy = true;
+    try {
+      const result = await callPrimeBridge({ kind: 'status' }, 1400);
+      if (result?.ok && result.status) {
+        state.primeBridgeStatus = result.status;
+        state.primeBridgeStatusAt = Date.now();
+        chrome.runtime.sendMessage(primeBridgeSnapshot('prime-heartbeat', result.status)).catch(() => undefined);
+      }
+    } finally {
+      state.primeBridgePollBusy = false;
+    }
+  }
+
   function snapshot(reason = 'status') {
     if (state.service === 'netflix' && state.netflixBridgeStatus && Date.now() - state.netflixBridgeStatusAt < 2500) {
       return bridgeSnapshot(reason, state.netflixBridgeStatus);
+    }
+    if (state.service === 'prime' && state.primeBridgeStatus && Date.now() - state.primeBridgeStatusAt < 2500) {
+      return primeBridgeSnapshot(reason, state.primeBridgeStatus);
     }
     const video = state.video;
     if (!video) {
@@ -208,6 +298,14 @@
 
   function emitControl(action) {
     if (isApplyingRemote() || !state.video) return;
+    if (Date.now() < state.localEventsSuppressedUntil) return;
+    if (document.visibilityState && document.visibilityState !== 'visible') return;
+    if (state.service === 'prime' && (action === 'seeking' || action === 'rate')) {
+      state.primeBridgeStatusAt = 0;
+      sendStatus(`prime-${action}`);
+      return;
+    }
+    if (state.service === 'prime') state.primeBridgeStatusAt = 0;
     const payload = snapshot('control');
     payload.type = 'APS_PLAYER_EVENT';
     payload.action = action;
@@ -219,6 +317,9 @@
     detach();
     state.video = video;
     state.attachedAt = Date.now();
+    if (state.service === 'prime') {
+      state.localEventsSuppressedUntil = Math.max(state.localEventsSuppressedUntil, Date.now() + 1800);
+    }
 
     video.addEventListener('play', onPlay, true);
     video.addEventListener('pause', onPause, true);
@@ -252,12 +353,14 @@
   function onMetadata() { sendStatus('metadata', true); }
 
   async function applyCommand(command) {
-    const video = state.video || findBestVideo();
-    if (!video) return { ok: false, error: 'No active video player found.' };
-    if (state.video !== video) attach(video);
-
     const kind = command?.kind;
-    markRemote(kind === 'sync' ? 1400 : 900);
+    const commandId = String(command?.commandId || '');
+    if (commandId && commandId === state.lastAppliedCommandId) {
+      return { ok: true, status: snapshot(`duplicate-${kind}`) };
+    }
+    if (commandId) state.lastAppliedCommandId = commandId;
+
+    markRemote(state.service === 'prime' ? (kind === 'sync' ? 3000 : 2400) : (kind === 'sync' ? 1400 : 900));
 
     try {
       if (state.service === 'netflix') {
@@ -271,6 +374,22 @@
         chrome.runtime.sendMessage(status).catch(() => undefined);
         return { ok: true, status };
       }
+
+      if (state.service === 'prime') {
+        const result = await callPrimeBridge(command, kind === 'sync' ? 3600 : 2800);
+        if (!result?.ok) throw new Error(result?.error || 'Prime Video player control failed.');
+        if (result.status) {
+          state.primeBridgeStatus = result.status;
+          state.primeBridgeStatusAt = Date.now();
+        }
+        const status = result.status ? primeBridgeSnapshot(`applied-${kind}`, result.status) : snapshot(`applied-${kind}`);
+        chrome.runtime.sendMessage(status).catch(() => undefined);
+        return { ok: true, status };
+      }
+
+      const video = state.video || findBestVideo();
+      if (!video) return { ok: false, error: 'No active video player found.' };
+      if (state.video !== video) attach(video);
 
       if (kind === 'play') {
         if (Number.isFinite(command.time)) video.currentTime = command.time;
@@ -376,9 +495,15 @@
   observer.observe(document.documentElement, { childList: true, subtree: true });
 
   setInterval(() => {
+    if (location.href !== state.lastLocationHref) {
+      state.lastLocationHref = location.href;
+      state.localEventsSuppressedUntil = Date.now() + 3000;
+      detach();
+    }
     const best = findBestVideo();
     if (best && best !== state.video) attach(best);
     if (state.service === 'netflix') refreshNetflixBridgeStatus();
+    else if (state.service === 'prime') refreshPrimeBridgeStatus();
     else if (state.video) sendStatus('heartbeat');
   }, 1000);
 

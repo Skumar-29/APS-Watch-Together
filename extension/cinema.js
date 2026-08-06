@@ -1,3 +1,5 @@
+import { enumerateMediaDevices, friendlyDeviceLabel, withExactDevice, publishTrackToPeer, setAudioOutputForElements, deriveMediaMode } from './media-tools.js';
+import { isScreenShareStream, inactiveScreenShare } from './collaboration-tools.js';
 const $ = (selector, root = document) => root.querySelector(selector);
 
 const ICONS = {
@@ -28,8 +30,15 @@ const app = {
   remoteStreams: new Map(),
   localStream: null,
   mediaMode: 'av',
+  mediaIntent: { audio: true, video: true },
   mediaAvailable: { audio: false, video: false },
   mediaEnabled: { audio: true, video: true },
+  devicePreferences: { audioinput: '', videoinput: '', audiooutput: '' },
+  devices: { audioinput: [], videoinput: [], audiooutput: [] },
+  deviceChangeTimer: null,
+  mediaOperation: null,
+  pendingMediaActivation: '',
+  negotiationTimers: new Map(),
   mediaWarnings: [],
   viewPreferences: { showSelf: true, showFriends: true },
   player: null,
@@ -39,7 +48,15 @@ const app = {
   intentionallyLeaving: false,
   closingForRestore: false,
   pipWindow: null,
-  activeTabId: null
+  activeTabId: null,
+  screenShare: inactiveScreenShare(),
+  localScreenStream: null,
+  remoteScreenStreams: new Map(),
+  peerStreamRegistry: new Map(),
+  screenSenders: new Map(),
+  screenViewHidden: false,
+  screenOperation: false,
+  stoppingScreenShare: false
 };
 
 const elements = {
@@ -53,7 +70,7 @@ const elements = {
   displayName: $('#displayName'),
   roomCode: $('#roomCode'),
   liveIndicator: $('#liveIndicator'),
-  remoteGrid: $('#remoteGrid'),
+  remoteGrid: $('#remoteGrid'), cinemaScreenStage: $('#cinemaScreenStage'), cinemaScreenVideo: $('#cinemaScreenVideo'), cinemaScreenPresenter: $('#cinemaScreenPresenter'), cinemaScreenStatus: $('#cinemaScreenStatus'), cinemaScreenToggleBtn: $('#cinemaScreenToggleBtn'), cinemaScreenHiddenBar: $('#cinemaScreenHiddenBar'), cinemaScreenHiddenText: $('#cinemaScreenHiddenText'),
   viewsHidden: $('#viewsHidden'),
   selfViewBtn: $('#selfViewBtn'),
   friendsViewBtn: $('#friendsViewBtn'),
@@ -61,6 +78,8 @@ const elements = {
   syncText: $('#syncText'),
   micBtn: $('#micBtn'),
   cameraBtn: $('#cameraBtn'),
+  shareScreenBtn: $('#shareScreenBtn'),
+  devicesBtn: $('#devicesBtn'), cinemaDevicePanel: $('#cinemaDevicePanel'), closeDevicesBtn: $('#closeDevicesBtn'), cinemaCameraSelect: $('#cinemaCameraSelect'), cinemaMicSelect: $('#cinemaMicSelect'), cinemaSpeakerSelect: $('#cinemaSpeakerSelect'), cinemaSpeakerField: $('#cinemaSpeakerField'), cinemaRefreshDevicesBtn: $('#cinemaRefreshDevicesBtn'), cinemaApplyDevicesBtn: $('#cinemaApplyDevicesBtn'), cinemaDeviceStatus: $('#cinemaDeviceStatus'),
   floatBtn: $('#floatBtn'),
   restoreBtn: $('#restoreBtn'),
   leaveBtn: $('#leaveBtn'),
@@ -74,12 +93,18 @@ async function init() {
     'apsSettings',
     'apsProfile',
     'apsActiveRoom',
-    'apsCinemaPreferences'
+    'apsCinemaPreferences',
+    'apsDevicePreferences',
+    'apsMediaIntent',
+    'apsScreenViewPreferences'
   ]);
   app.settings = stored.apsSettings || {};
   app.profile = stored.apsProfile || { displayName: 'Guest', avatarSeed: crypto.randomUUID() };
   app.roomCode = normalizeCode(params.get('room') || stored.apsActiveRoom?.roomCode || '');
-  app.mediaMode = MEDIA_MODES[stored.apsActiveRoom?.mediaMode] ? stored.apsActiveRoom.mediaMode : 'av';
+  app.devicePreferences = { ...app.devicePreferences, ...(stored.apsDevicePreferences || {}) };
+  app.mediaIntent = stored.apsMediaIntent || mediaIntentForMode(stored.apsActiveRoom?.mediaMode || 'av');
+  app.mediaMode = deriveMediaMode(app.mediaIntent);
+  app.screenViewHidden = Boolean(stored.apsScreenViewPreferences?.hidden);
   app.viewPreferences = {
     showSelf: stored.apsCinemaPreferences?.showSelf !== false,
     showFriends: stored.apsCinemaPreferences?.showFriends !== false
@@ -89,6 +114,8 @@ async function init() {
   elements.initial.textContent = initialOf(app.profile.displayName || 'You');
   elements.roomCode.textContent = formatRoomCode(app.roomCode);
   bindEvents();
+  setupDeviceMonitoring();
+  await refreshCinemaDevices({ quiet: true });
   applyViewPreferences(false);
   renderRemoteViews();
 
@@ -106,6 +133,14 @@ async function init() {
 function bindEvents() {
   elements.micBtn.addEventListener('click', toggleMicrophone);
   elements.cameraBtn.addEventListener('click', toggleCamera);
+  elements.shareScreenBtn.addEventListener('click', toggleCinemaScreenShare);
+  elements.cinemaScreenToggleBtn.addEventListener('click', toggleCinemaScreenView);
+  elements.cinemaScreenHiddenBar.addEventListener('click', toggleCinemaScreenView);
+  elements.devicesBtn.addEventListener('click', toggleCinemaDevicePanel);
+  elements.closeDevicesBtn.addEventListener('click', () => toggleCinemaDevicePanel(false));
+  elements.cinemaRefreshDevicesBtn.addEventListener('click', () => refreshCinemaDevices({ announce: true }));
+  elements.cinemaApplyDevicesBtn.addEventListener('click', applyCinemaDevices);
+  elements.cinemaSpeakerSelect.addEventListener('change', applyCinemaAudioOutput);
   elements.selfViewBtn.addEventListener('click', () => setViewPreference('showSelf', !app.viewPreferences.showSelf));
   elements.friendsViewBtn.addEventListener('click', () => setViewPreference('showFriends', !app.viewPreferences.showFriends));
   elements.floatBtn.addEventListener('click', openFloatingCallView);
@@ -113,6 +148,16 @@ function bindEvents() {
   elements.leaveBtn.addEventListener('click', leaveRoom);
 
   chrome.runtime.onMessage.addListener((message, sender) => {
+    if (message?.type === 'APS_MEDIA_PERMISSION_GRANTED' && app.pendingMediaActivation) {
+      const kind = app.pendingMediaActivation;
+      app.pendingMediaActivation = '';
+      if (message.cancelled || message.mediaMode === 'watch') {
+        elements.hint.textContent = `${kind === 'video' ? 'Camera' : 'Microphone'} remains off. You can try again anytime.`;
+      } else {
+        activateCinemaMedia(kind).catch((error) => { elements.hint.textContent = error?.message || 'Could not start the device.'; });
+      }
+      return;
+    }
     if (message?.type === 'APS_PANEL_RESTORED' && message.roomCode === app.roomCode) {
       finishRestoreHandoff();
       return;
@@ -127,30 +172,164 @@ function bindEvents() {
       sendSocket({ type: 'leave-room' });
       chrome.storage.local.remove(['apsActiveRoom', 'apsRestoreRoom']);
     }
+    stopCinemaScreenShare(false);
     stopAllMedia();
+    navigator.mediaDevices?.removeEventListener?.('devicechange', handleCinemaDeviceChange);
   });
 }
 
-function cinemaVideoConstraints() {
+function mediaIntentForMode(mode) {
+  const config = MEDIA_MODES[MEDIA_MODES[mode] ? mode : 'av'];
+  return { audio: config.audio, video: config.video };
+}
+
+function setupDeviceMonitoring() {
+  navigator.mediaDevices?.addEventListener?.('devicechange', handleCinemaDeviceChange);
+  elements.cinemaSpeakerField.hidden = typeof HTMLMediaElement.prototype.setSinkId !== 'function';
+}
+
+function handleCinemaDeviceChange() {
+  clearTimeout(app.deviceChangeTimer);
+  app.deviceChangeTimer = setTimeout(async () => {
+    const before = new Set(Object.values(app.devices).flat().map((device) => `${device.kind}:${device.deviceId}`));
+    await refreshCinemaDevices({ quiet: true });
+    const after = new Set(Object.values(app.devices).flat().map((device) => `${device.kind}:${device.deviceId}`));
+    const added = [...after].some((id) => !before.has(id));
+    const removed = [...before].some((id) => !after.has(id));
+    if (added) {
+      elements.hint.textContent = 'New call device detected. APS is reconnecting it when enabled.';
+      if (app.mediaIntent.video && !app.mediaAvailable.video && app.devices.videoinput.length) await activateCinemaMedia('video', { quiet: true }).catch(() => undefined);
+      if (app.mediaIntent.audio && !app.mediaAvailable.audio && app.devices.audioinput.length) await activateCinemaMedia('audio', { quiet: true }).catch(() => undefined);
+    } else if (removed) elements.hint.textContent = 'A call device was disconnected. The room is still active.';
+  }, 350);
+}
+
+async function refreshCinemaDevices({ quiet = false, announce = false } = {}) {
+  try {
+    app.devices = await enumerateMediaDevices();
+    populateCinemaSelect(elements.cinemaCameraSelect, app.devices.videoinput, app.devicePreferences.videoinput, 'Automatic camera', 'Camera');
+    populateCinemaSelect(elements.cinemaMicSelect, app.devices.audioinput, app.devicePreferences.audioinput, 'Automatic microphone', 'Microphone');
+    populateCinemaSelect(elements.cinemaSpeakerSelect, app.devices.audiooutput, app.devicePreferences.audiooutput, 'System default', 'Speaker');
+    if (announce) elements.hint.textContent = 'Call devices refreshed.';
+    if (!quiet) elements.cinemaDeviceStatus.textContent = `${app.devices.videoinput.length || 'No'} camera(s) · ${app.devices.audioinput.length || 'No'} microphone(s)`;
+  } catch (error) {
+    if (!quiet) elements.cinemaDeviceStatus.textContent = error?.message || 'Could not read call devices.';
+  }
+}
+
+function populateCinemaSelect(select, devices, selectedId, automaticLabel, fallback) {
+  select.replaceChildren();
+  const automatic = document.createElement('option');
+  automatic.value = '';
+  automatic.textContent = automaticLabel;
+  select.appendChild(automatic);
+  devices.forEach((device, index) => {
+    const option = document.createElement('option');
+    option.value = device.deviceId;
+    option.textContent = friendlyDeviceLabel(device, index, fallback);
+    select.appendChild(option);
+  });
+  select.value = devices.some((device) => device.deviceId === selectedId) ? selectedId : '';
+}
+
+async function toggleCinemaDevicePanel(force) {
+  const show = typeof force === 'boolean' ? force : elements.cinemaDevicePanel.hidden;
+  elements.cinemaDevicePanel.hidden = !show;
+  elements.devicesBtn.classList.toggle('active', show);
+  if (show) await refreshCinemaDevices({ quiet: false });
+}
+
+function rememberCinemaDevices() {
+  app.devicePreferences = {
+    videoinput: elements.cinemaCameraSelect.value || '',
+    audioinput: elements.cinemaMicSelect.value || '',
+    audiooutput: elements.cinemaSpeakerSelect.value || ''
+  };
+  chrome.storage.local.set({ apsDevicePreferences: app.devicePreferences });
+}
+
+async function applyCinemaDevices() {
+  rememberCinemaDevices();
+  elements.cinemaApplyDevicesBtn.disabled = true;
+  elements.cinemaApplyDevicesBtn.textContent = 'Applying…';
+  try {
+    if (app.mediaIntent.video || app.mediaAvailable.video) {
+      const applied = await activateCinemaMedia('video', { preserveState: true, quiet: true, force: true });
+      if (applied === false) { elements.cinemaDeviceStatus.textContent = 'Complete the camera permission tab, then return here.'; return; }
+    }
+    if (app.mediaIntent.audio || app.mediaAvailable.audio) {
+      const applied = await activateCinemaMedia('audio', { preserveState: true, quiet: true, force: true });
+      if (applied === false) { elements.cinemaDeviceStatus.textContent = 'Complete the microphone permission tab, then return here.'; return; }
+    }
+    await applyCinemaAudioOutput();
+    elements.cinemaDeviceStatus.textContent = 'Devices updated without leaving the room.';
+  } catch (error) {
+    elements.cinemaDeviceStatus.textContent = error?.message || 'Could not update call devices.';
+  } finally {
+    elements.cinemaApplyDevicesBtn.disabled = false;
+    elements.cinemaApplyDevicesBtn.textContent = 'Apply';
+  }
+}
+
+async function applyCinemaAudioOutput() {
+  app.devicePreferences.audiooutput = elements.cinemaSpeakerSelect.value || '';
+  await chrome.storage.local.set({ apsDevicePreferences: app.devicePreferences });
+  await setAudioOutputForElements(document, app.devicePreferences.audiooutput);
+}
+
+function cinemaVideoConstraints(deviceId = app.devicePreferences.videoinput) {
   const quality = app.settings.videoQuality || 'hd';
-  return quality === 'fullhd'
+  const base = quality === 'fullhd'
     ? { width: { ideal: 1920, max: 1920 }, height: { ideal: 1080, max: 1080 }, frameRate: { ideal: 30, max: 30 }, facingMode: 'user' }
     : quality === 'sd'
       ? { width: { ideal: 640 }, height: { ideal: 360 }, frameRate: { ideal: 24, max: 30 }, facingMode: 'user' }
       : { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 30 }, facingMode: 'user' };
+  return withExactDevice(base, deviceId);
 }
 
-function cinemaAudioConstraints() {
-  return {
+function cinemaAudioConstraints(deviceId = app.devicePreferences.audioinput) {
+  return withExactDevice({
     echoCancellation: app.settings.echoCancellation !== false,
     noiseSuppression: app.settings.noiseSuppression !== false,
     autoGainControl: app.settings.autoGainControl !== false,
     channelCount: 1
-  };
+  }, deviceId);
+}
+
+async function requestCinemaMediaKind(kind, deviceId) {
+  const selected = deviceId ?? (kind === 'video' ? app.devicePreferences.videoinput : app.devicePreferences.audioinput);
+  try {
+    return await navigator.mediaDevices.getUserMedia(kind === 'video'
+      ? { video: cinemaVideoConstraints(selected), audio: false }
+      : { video: false, audio: cinemaAudioConstraints(selected) });
+  } catch (error) {
+    if (selected && ['NotFoundError', 'OverconstrainedError'].includes(error?.name)) {
+      if (kind === 'video') app.devicePreferences.videoinput = '';
+      else app.devicePreferences.audioinput = '';
+      await chrome.storage.local.set({ apsDevicePreferences: app.devicePreferences });
+      return navigator.mediaDevices.getUserMedia(kind === 'video'
+        ? { video: cinemaVideoConstraints(''), audio: false }
+        : { video: false, audio: cinemaAudioConstraints('') });
+    }
+    throw error;
+  }
+}
+
+function bindCinemaTrackLifecycle(kind, track) {
+  track.addEventListener('ended', () => {
+    const current = kind === 'audio' ? app.localStream?.getAudioTracks()[0] : app.localStream?.getVideoTracks()[0];
+    if (current?.id !== track.id) return;
+    app.localStream?.removeTrack(track);
+    app.mediaAvailable[kind] = false;
+    app.mediaEnabled[kind] = false;
+    updateMediaState();
+    elements.hint.textContent = `${kind === 'video' ? 'Camera' : 'Microphone'} disconnected. Connect another and press the ${kind === 'video' ? 'Camera' : 'Mic'} button.`;
+  }, { once: true });
 }
 
 async function ensureLocalMedia(mode = app.mediaMode) {
   const requested = MEDIA_MODES[mode] || MEDIA_MODES.av;
+  app.mediaIntent = { audio: requested.audio, video: requested.video };
   const combined = new MediaStream();
   app.mediaWarnings = [];
 
@@ -158,10 +337,11 @@ async function ensureLocalMedia(mode = app.mediaMode) {
     for (const kind of ['video', 'audio']) {
       if (!requested[kind]) continue;
       try {
-        const partial = await navigator.mediaDevices.getUserMedia(kind === 'video'
-          ? { video: cinemaVideoConstraints(), audio: false }
-          : { video: false, audio: cinemaAudioConstraints() });
-        for (const track of partial.getTracks()) combined.addTrack(track);
+        const partial = await requestCinemaMediaKind(kind);
+        for (const track of partial.getTracks()) {
+          combined.addTrack(track);
+          bindCinemaTrackLifecycle(kind, track);
+        }
       } catch (error) {
         app.mediaWarnings.push(`${kind === 'video' ? 'Camera' : 'Microphone'} unavailable.`);
       }
@@ -173,10 +353,73 @@ async function ensureLocalMedia(mode = app.mediaMode) {
     audio: combined.getAudioTracks().some((track) => track.readyState === 'live'),
     video: combined.getVideoTracks().some((track) => track.readyState === 'live')
   };
-  app.mediaEnabled = { ...app.mediaAvailable };
+  app.mediaEnabled = {
+    audio: app.mediaAvailable.audio && app.mediaIntent.audio,
+    video: app.mediaAvailable.video && app.mediaIntent.video
+  };
   elements.localVideo.srcObject = combined;
   if (app.mediaAvailable.video) elements.localVideo.play().catch(() => undefined);
   updateMediaUI();
+  await refreshCinemaDevices({ quiet: true });
+}
+
+async function openCinemaPermissionTab(kind) {
+  app.pendingMediaActivation = kind;
+  const url = new URL(chrome.runtime.getURL('request-permissions.html'));
+  url.searchParams.set('mode', kind === 'audio' ? 'audio' : 'video');
+  url.searchParams.set('purpose', 'activate');
+  await chrome.tabs.create({ url: url.href, active: true });
+  elements.hint.textContent = `Allow the ${kind === 'video' ? 'camera' : 'microphone'} in the permission tab, then return here.`;
+}
+
+async function activateCinemaMedia(kind, { preserveState = false, quiet = false, force = false } = {}) {
+  if (app.mediaOperation && !force) return;
+  app.mediaOperation = kind;
+  const button = kind === 'audio' ? elements.micBtn : elements.cameraBtn;
+  button.classList.add('busy');
+  const desiredEnabled = preserveState ? (app.mediaAvailable[kind] ? app.mediaEnabled[kind] : app.mediaIntent[kind]) : true;
+  const desiredIntent = preserveState ? app.mediaIntent[kind] : true;
+  app.mediaIntent[kind] = desiredIntent;
+  app.mediaMode = deriveMediaMode(app.mediaIntent);
+  try {
+    const partial = await requestCinemaMediaKind(kind);
+    const track = kind === 'audio' ? partial.getAudioTracks()[0] : partial.getVideoTracks()[0];
+    if (!track) throw new Error(`No ${kind === 'video' ? 'camera' : 'microphone'} was found.`);
+    await replaceCinemaTrack(kind, track, desiredEnabled);
+    partial.getTracks().filter((item) => item.id !== track.id).forEach((item) => item.stop());
+    if (!quiet) elements.hint.textContent = `${kind === 'video' ? 'Camera' : 'Microphone'} is now on.`;
+    await refreshCinemaDevices({ quiet: true });
+    return true;
+  } catch (error) {
+    if (['NotAllowedError', 'PermissionDeniedError', 'SecurityError'].includes(error?.name)) {
+      await openCinemaPermissionTab(kind);
+      return false;
+    }
+    throw error;
+  } finally {
+    app.mediaOperation = null;
+    button.classList.remove('busy');
+    updateMediaUI();
+  }
+}
+
+async function replaceCinemaTrack(kind, newTrack, enabled = true) {
+  if (!app.localStream) app.localStream = new MediaStream();
+  const oldTracks = kind === 'audio' ? app.localStream.getAudioTracks() : app.localStream.getVideoTracks();
+  for (const oldTrack of oldTracks) app.localStream.removeTrack(oldTrack);
+  app.localStream.addTrack(newTrack);
+  newTrack.enabled = Boolean(enabled);
+  bindCinemaTrackLifecycle(kind, newTrack);
+  for (const [peerId, pc] of app.peers) {
+    const result = await publishTrackToPeer(pc, kind, newTrack, app.localStream);
+    if (result.needsNegotiation) scheduleCinemaNegotiation(peerId);
+  }
+  oldTracks.forEach((track) => track.stop());
+  app.mediaAvailable[kind] = true;
+  app.mediaEnabled[kind] = Boolean(enabled);
+  elements.localVideo.srcObject = app.localStream;
+  if (kind === 'video') elements.localVideo.play().catch(() => undefined);
+  updateMediaState();
 }
 
 function connectSocket() {
@@ -194,7 +437,7 @@ function connectSocket() {
       displayName: app.profile.displayName,
       clientVersion: chrome.runtime.getManifest().version,
       sessionId: app.profile.avatarSeed,
-      capabilities: { playback: true, audio: app.mediaEnabled.audio, video: app.mediaEnabled.video, chat: false, cinema: true }
+      capabilities: { playback: true, audio: app.mediaEnabled.audio, video: app.mediaEnabled.video, chat: false, cinema: true, screenShare: true }
     });
     sendSocket({ type: 'join-room', roomCode: app.roomCode, reconnect: true });
   });
@@ -257,6 +500,9 @@ async function handleSocketMessage(message) {
       app.hostId = message.hostId || '';
       updateRole();
       break;
+    case 'screen-share-state':
+      handleCinemaScreenShareState(message.screenShare);
+      break;
     case 'media-state': {
       const participant = app.participants.get(message.participantId);
       if (participant) participant.media = { ...participant.media, ...message.media };
@@ -264,6 +510,7 @@ async function handleSocketMessage(message) {
       break;
     }
     case 'error':
+      if (/screen.*already|already.*screen|presenting/i.test(String(message.message || '')) && app.localScreenStream) stopCinemaScreenShare(false);
       fail(message.message || 'Room connection failed.');
       break;
     default:
@@ -275,6 +522,7 @@ function enterRoom(message) {
   app.selfId = message.selfId || app.selfId;
   app.hostId = message.hostId;
   app.sharedControls = Boolean(message.everyoneCanControl);
+  app.screenShare = message.screenShare || inactiveScreenShare();
   app.participants.clear();
   for (const participant of message.participants || []) addParticipant(participant);
   if (!app.participants.has(app.selfId)) {
@@ -283,6 +531,7 @@ function enterRoom(message) {
   updateRole();
   updateParticipantUI();
   renderRemoteViews();
+  updateCinemaScreenUI();
   elements.connectionText.textContent = 'Cinema Mode connected';
   startHeartbeat();
   chrome.storage.local.set({
@@ -318,7 +567,12 @@ function removeParticipant(id) {
   app.participants.delete(id);
   app.peers.get(id)?.close();
   app.peers.delete(id);
+  clearTimeout(app.negotiationTimers.get(id));
+  app.negotiationTimers.delete(id);
   app.remoteStreams.delete(id);
+  app.remoteScreenStreams.delete(id);
+  app.peerStreamRegistry.delete(id);
+  app.screenSenders.delete(id);
   document.querySelector(`[data-audio-peer="${CSS.escape(id)}"]`)?.remove();
 }
 
@@ -353,20 +607,20 @@ function getPeer(peerId) {
   }
   if (!localKinds.has('audio')) pc.addTransceiver('audio', { direction: 'recvonly' });
   if (!localKinds.has('video')) pc.addTransceiver('video', { direction: 'recvonly' });
+  if (app.localScreenStream?.active) {
+    const senders = [];
+    for (const track of app.localScreenStream.getTracks()) senders.push(pc.addTrack(track, app.localScreenStream));
+    app.screenSenders.set(peerId, senders);
+  }
 
   pc.onicecandidate = (event) => {
     if (event.candidate) sendSocket({ type: 'signal', targetId: peerId, signal: { candidate: event.candidate } });
   };
 
+  pc.onnegotiationneeded = () => scheduleCinemaNegotiation(peerId);
+
   pc.ontrack = (event) => {
-    const remoteStream = event.streams[0] || app.remoteStreams.get(peerId) || new MediaStream();
-    if (!event.streams[0] && !remoteStream.getTracks().some((track) => track.id === event.track.id)) {
-      remoteStream.addTrack(event.track);
-    }
-    app.remoteStreams.set(peerId, remoteStream);
-    event.track.addEventListener('ended', renderRemoteViews, { once: true });
-    attachRemoteAudio(peerId, remoteStream);
-    renderRemoteViews();
+    registerCinemaRemoteTrack(peerId, event);
   };
 
   pc.onconnectionstatechange = () => {
@@ -380,6 +634,15 @@ function getPeer(peerId) {
     }
   };
   return pc;
+}
+
+function scheduleCinemaNegotiation(peerId) {
+  clearTimeout(app.negotiationTimers.get(peerId));
+  const timer = setTimeout(() => {
+    app.negotiationTimers.delete(peerId);
+    createOffer(peerId).catch((error) => console.warn('APS Cinema renegotiation failed', error));
+  }, 120);
+  app.negotiationTimers.set(peerId, timer);
 }
 
 async function createOffer(peerId, iceRestart = false) {
@@ -430,11 +693,174 @@ function attachRemoteAudio(peerId, stream) {
     elements.remoteAudio.appendChild(audio);
   }
   audio.srcObject = new MediaStream(audioTracks);
+  if (app.devicePreferences.audiooutput && typeof audio.setSinkId === 'function') audio.setSinkId(app.devicePreferences.audiooutput).catch(() => undefined);
   audio.play().catch(() => undefined);
+}
+
+
+function registerCinemaRemoteTrack(peerId, event) {
+  const registry = app.peerStreamRegistry.get(peerId) || new Map();
+  let stream = event.streams?.[0];
+  if (!stream) {
+    stream = registry.get(`fallback-${event.track.kind}`) || new MediaStream();
+    if (!stream.getTracks().some((track) => track.id === event.track.id)) stream.addTrack(event.track);
+  }
+  registry.set(stream.id || `fallback-${event.track.kind}`, stream);
+  app.peerStreamRegistry.set(peerId, registry);
+  event.track.addEventListener('ended', () => reconcileCinemaPeerStreams(peerId), { once: true });
+  reconcileCinemaPeerStreams(peerId);
+}
+
+function reconcileCinemaPeerStreams(peerId) {
+  const registry = app.peerStreamRegistry.get(peerId) || new Map();
+  let cameraStream = null;
+  let screenStream = null;
+  for (const stream of registry.values()) {
+    if (isScreenShareStream(peerId, stream.id, app.screenShare)) screenStream = stream;
+    else if (!cameraStream || stream.getTracks().length > cameraStream.getTracks().length) cameraStream = stream;
+  }
+  if (cameraStream) {
+    app.remoteStreams.set(peerId, cameraStream);
+    attachRemoteAudio(peerId, cameraStream);
+  }
+  if (screenStream) app.remoteScreenStreams.set(peerId, screenStream);
+  else app.remoteScreenStreams.delete(peerId);
+  renderRemoteViews();
+}
+
+async function toggleCinemaScreenShare() {
+  if (app.localScreenStream) {
+    await stopCinemaScreenShare(true);
+    return;
+  }
+  if (app.screenShare.active && app.screenShare.presenterId !== app.selfId) {
+    elements.hint.textContent = `${app.screenShare.presenterName || 'A friend'} is already presenting.`;
+    return;
+  }
+  await startCinemaScreenShare();
+}
+
+async function startCinemaScreenShare() {
+  if (app.screenOperation || !app.roomCode) return;
+  if (!navigator.mediaDevices?.getDisplayMedia) {
+    elements.hint.textContent = 'Screen sharing is unavailable in this Chrome version.';
+    return;
+  }
+  app.screenOperation = true;
+  updateCinemaScreenButton();
+  try {
+    const stream = await navigator.mediaDevices.getDisplayMedia({
+      video: { frameRate: { ideal: 15, max: 30 } },
+      audio: true,
+      selfBrowserSurface: 'exclude',
+      surfaceSwitching: 'include',
+      systemAudio: 'include'
+    });
+    const videoTrack = stream.getVideoTracks()[0];
+    if (!videoTrack) throw new Error('No screen was selected.');
+    videoTrack.contentHint = 'detail';
+    app.localScreenStream = stream;
+    app.screenShare = { active: true, presenterId: app.selfId, presenterName: app.profile.displayName || 'You', streamId: stream.id };
+    app.screenViewHidden = false;
+    videoTrack.addEventListener('ended', () => stopCinemaScreenShare(true), { once: true });
+    for (const [peerId, pc] of app.peers) {
+      const senders = [];
+      for (const track of stream.getTracks()) senders.push(pc.addTrack(track, stream));
+      app.screenSenders.set(peerId, senders);
+      scheduleCinemaNegotiation(peerId);
+    }
+    sendSocket({ type: 'screen-share-state', active: true, streamId: stream.id });
+    elements.hint.textContent = 'You are sharing. Protected OTT video may appear blank; normal tabs, documents and apps work.';
+    updateCinemaScreenUI();
+  } catch (error) {
+    if (error?.name !== 'AbortError' && error?.name !== 'NotAllowedError') elements.hint.textContent = error?.message || 'Could not start screen sharing.';
+  } finally {
+    app.screenOperation = false;
+    updateCinemaScreenButton();
+  }
+}
+
+async function stopCinemaScreenShare(notifyServer = true) {
+  if (app.stoppingScreenShare) return;
+  app.stoppingScreenShare = true;
+  const stream = app.localScreenStream;
+  app.localScreenStream = null;
+  for (const [peerId, senders] of app.screenSenders) {
+    const pc = app.peers.get(peerId);
+    if (pc) {
+      for (const sender of senders) {
+        try { pc.removeTrack(sender); } catch { /* Peer may be closing. */ }
+      }
+      scheduleCinemaNegotiation(peerId);
+    }
+  }
+  app.screenSenders.clear();
+  stream?.getTracks().forEach((track) => track.stop());
+  if (app.screenShare.presenterId === app.selfId) app.screenShare = inactiveScreenShare();
+  if (notifyServer && app.roomCode) sendSocket({ type: 'screen-share-state', active: false });
+  updateCinemaScreenUI();
+  app.stoppingScreenShare = false;
+}
+
+function handleCinemaScreenShareState(nextState) {
+  const previous = app.screenShare;
+  app.screenShare = nextState?.active ? {
+    active: true,
+    presenterId: String(nextState.presenterId || ''),
+    presenterName: String(nextState.presenterName || 'Friend'),
+    streamId: String(nextState.streamId || '')
+  } : inactiveScreenShare();
+  if (!app.screenShare.active && previous.presenterId === app.selfId && app.localScreenStream) stopCinemaScreenShare(false);
+  if (app.screenShare.active) reconcileCinemaPeerStreams(app.screenShare.presenterId);
+  else app.remoteScreenStreams.clear();
+  updateCinemaScreenUI();
+}
+
+function currentCinemaScreenStream() {
+  if (!app.screenShare.active) return null;
+  if (app.screenShare.presenterId === app.selfId) return app.localScreenStream;
+  return app.remoteScreenStreams.get(app.screenShare.presenterId) || null;
+}
+
+function toggleCinemaScreenView() {
+  if (!app.screenShare.active) return;
+  app.screenViewHidden = !app.screenViewHidden;
+  chrome.storage.local.set({ apsScreenViewPreferences: { hidden: app.screenViewHidden } });
+  updateCinemaScreenUI();
+}
+
+function updateCinemaScreenButton() {
+  const local = Boolean(app.localScreenStream);
+  const blocked = app.screenShare.active && app.screenShare.presenterId !== app.selfId;
+  elements.shareScreenBtn.classList.toggle('sharing', local);
+  elements.shareScreenBtn.disabled = app.screenOperation;
+  elements.shareScreenBtn.title = local ? 'Stop sharing screen' : blocked ? `${app.screenShare.presenterName || 'A friend'} is presenting` : 'Share a tab, window or screen';
+}
+
+function updateCinemaScreenUI() {
+  const active = Boolean(app.screenShare.active);
+  const stream = currentCinemaScreenStream();
+  const hidden = active && app.screenViewHidden;
+  elements.cinemaScreenStage.hidden = !active || hidden;
+  elements.cinemaScreenHiddenBar.hidden = !active || !hidden;
+  elements.cameraStage.classList.toggle('screen-active', active && !hidden);
+  elements.cinemaScreenPresenter.textContent = active ? `${app.screenShare.presenterName || 'Friend'} is presenting` : 'Screen share';
+  elements.cinemaScreenHiddenText.textContent = active ? `${app.screenShare.presenterName || 'Friend'} is presenting` : 'Screen share hidden';
+  elements.cinemaScreenStatus.textContent = app.screenShare.presenterId === app.selfId ? 'You are sharing' : stream ? 'Live screen share' : 'Connecting…';
+  elements.cinemaScreenToggleBtn.textContent = hidden ? 'Show' : 'Hide';
+  if (elements.cinemaScreenVideo.srcObject !== stream) {
+    elements.cinemaScreenVideo.srcObject = stream;
+    elements.cinemaScreenVideo.muted = app.screenShare.presenterId === app.selfId;
+    if (stream) elements.cinemaScreenVideo.play().catch(() => undefined);
+  }
+  elements.cinemaScreenStage.classList.toggle('has-stream', Boolean(stream?.getVideoTracks().some((track) => track.readyState === 'live')));
+  updateCinemaScreenButton();
+  renderPipCallView();
 }
 
 function renderRemoteViews() {
   renderRemoteGridInto(document, elements.remoteGrid);
+  updateCinemaScreenUI();
   renderPipCallView();
 }
 
@@ -544,21 +970,29 @@ function updateViewButton(button, active) {
   button.setAttribute('aria-pressed', String(active));
 }
 
-function toggleMicrophone() {
+async function toggleMicrophone() {
   if (!app.mediaAvailable.audio) {
-    elements.hint.textContent = 'No microphone is active. Return to Full controls and rejoin with Audio enabled after connecting one.';
+    try { await activateCinemaMedia('audio'); }
+    catch (error) { elements.hint.textContent = error?.message || 'Could not start the microphone.'; }
     return;
   }
   app.mediaEnabled.audio = !app.mediaEnabled.audio;
+  app.mediaIntent.audio = app.mediaEnabled.audio;
+  app.mediaMode = deriveMediaMode(app.mediaIntent);
+  await chrome.storage.local.set({ apsMediaIntent: app.mediaIntent, apsMediaMode: app.mediaMode });
   updateMediaState();
 }
 
-function toggleCamera() {
+async function toggleCamera() {
   if (!app.mediaAvailable.video) {
-    elements.hint.textContent = 'No camera is active. Return to Full controls and rejoin with Video enabled after connecting one.';
+    try { await activateCinemaMedia('video'); }
+    catch (error) { elements.hint.textContent = error?.message || 'Could not start the camera.'; }
     return;
   }
   app.mediaEnabled.video = !app.mediaEnabled.video;
+  app.mediaIntent.video = app.mediaEnabled.video;
+  app.mediaMode = deriveMediaMode(app.mediaIntent);
+  await chrome.storage.local.set({ apsMediaIntent: app.mediaIntent, apsMediaMode: app.mediaMode });
   updateMediaState();
 }
 
@@ -571,6 +1005,18 @@ function updateMediaState() {
   if (self) self.media = { ...app.mediaEnabled };
   updateMediaUI();
   sendSocket({ type: 'media-state', media: app.mediaEnabled });
+  chrome.storage.local.set({
+    apsMediaIntent: app.mediaIntent,
+    apsMediaMode: deriveMediaMode(app.mediaIntent),
+    apsActiveRoom: {
+      roomCode: app.roomCode,
+      displayName: app.profile.displayName,
+      mediaMode: deriveMediaMode(app.mediaIntent),
+      media: { ...app.mediaEnabled },
+      updatedAt: Date.now(),
+      expiresAt: Date.now() + 8 * 60 * 60 * 1000
+    }
+  });
 }
 
 function effectiveCinemaModeLabel() {
@@ -580,15 +1026,23 @@ function effectiveCinemaModeLabel() {
   return MEDIA_MODES.watch.label;
 }
 
+function updateCinemaActionButton(button, kind) {
+  const available = app.mediaAvailable[kind];
+  const enabled = app.mediaEnabled[kind];
+  button.disabled = false;
+  button.classList.toggle('active', available && enabled);
+  button.classList.toggle('off', available && !enabled);
+  button.classList.toggle('unavailable', !available);
+  button.classList.toggle('add-device', !available);
+  button.querySelector('svg').innerHTML = kind === 'audio' ? (enabled ? ICONS.mic : ICONS.micOff) : (enabled ? ICONS.camera : ICONS.cameraOff);
+  const label = kind === 'audio' ? 'microphone' : 'camera';
+  button.title = !available ? `Connect or start ${label}` : enabled ? `Turn ${label} off` : `Turn ${label} on`;
+  button.setAttribute('aria-label', button.title);
+}
+
 function updateMediaUI() {
-  elements.micBtn.disabled = !app.mediaAvailable.audio;
-  elements.micBtn.className = `circle-btn ${app.mediaAvailable.audio ? (app.mediaEnabled.audio ? 'active' : 'off') : 'unavailable'}`;
-  elements.micBtn.querySelector('svg').innerHTML = app.mediaEnabled.audio ? ICONS.mic : ICONS.micOff;
-  elements.micBtn.title = app.mediaAvailable.audio ? (app.mediaEnabled.audio ? 'Mute microphone' : 'Unmute microphone') : 'No microphone active';
-  elements.cameraBtn.disabled = !app.mediaAvailable.video;
-  elements.cameraBtn.className = `circle-btn ${app.mediaAvailable.video ? (app.mediaEnabled.video ? 'active' : 'off') : 'unavailable'}`;
-  elements.cameraBtn.querySelector('svg').innerHTML = app.mediaEnabled.video ? ICONS.camera : ICONS.cameraOff;
-  elements.cameraBtn.title = app.mediaAvailable.video ? (app.mediaEnabled.video ? 'Turn camera off' : 'Turn camera on') : 'No camera active';
+  updateCinemaActionButton(elements.micBtn, 'audio');
+  updateCinemaActionButton(elements.cameraBtn, 'video');
   elements.selfCard.classList.toggle('has-video', app.mediaEnabled.video && hasLiveVideo(app.localStream));
   elements.liveIndicator.textContent = app.mediaEnabled.video ? 'LIVE' : effectiveCinemaModeLabel();
   renderPipCallView();
@@ -697,6 +1151,7 @@ async function openFloatingCallView() {
           <button class="view-btn" data-action="friends-view" type="button">Friends</button>
         </div>
       </header>
+      <section class="shared-pip-stage" data-pip-screen hidden><video autoplay playsinline></video></section>
       <section class="camera-stage" data-pip-stage>
         <article class="camera-card self-card" data-pip-self>
           <video autoplay muted playsinline></video>
@@ -708,8 +1163,10 @@ async function openFloatingCallView() {
         <div class="views-hidden" data-pip-hidden hidden><span class="hidden-icon">◉</span><strong>Camera previews hidden</strong><small>Call audio and synchronization continue.</small></div>
       </section>
       <div class="pip-controls">
-        <button data-action="mic" title="Mute microphone">Mic</button>
-        <button data-action="camera" title="Turn camera off">Camera</button>
+        <button data-action="mic" title="Mute or connect microphone">Mic</button>
+        <button data-action="camera" title="Turn camera off or connect one">Camera</button>
+        <button data-action="share" title="Share or stop sharing your screen">Share</button>
+        <button data-action="devices" title="Change camera, microphone or speakers">Devices</button>
         <button data-action="restore" class="primary">Full controls</button>
       </div>`;
     pip.document.body.appendChild(root);
@@ -718,6 +1175,8 @@ async function openFloatingCallView() {
     $('[data-action="friends-view"]', root).addEventListener('click', () => setViewPreference('showFriends', !app.viewPreferences.showFriends));
     $('[data-action="mic"]', root).addEventListener('click', toggleMicrophone);
     $('[data-action="camera"]', root).addEventListener('click', toggleCamera);
+    $('[data-action="share"]', root).addEventListener('click', toggleCinemaScreenShare);
+    $('[data-action="devices"]', root).addEventListener('click', openDevicesFromPip);
     $('[data-action="restore"]', root).addEventListener('click', restoreFullControls);
 
     renderPipCallView();
@@ -745,8 +1204,18 @@ function renderPipCallView() {
   const selfVideo = $('video', selfCard);
   const grid = $('[data-pip-grid]', doc);
   const hidden = $('[data-pip-hidden]', doc);
+  const screenStage = $('[data-pip-screen]', doc);
+  const screenVideo = $('video', screenStage);
+  const screenStream = currentCinemaScreenStream();
   const { showSelf, showFriends } = app.viewPreferences;
 
+  pip.document.querySelector('.pip-root')?.classList.toggle('has-screen', Boolean(app.screenShare.active && !app.screenViewHidden));
+  if (screenStage) screenStage.hidden = !app.screenShare.active || app.screenViewHidden;
+  if (screenVideo && screenVideo.srcObject !== screenStream) {
+    screenVideo.srcObject = screenStream;
+    screenVideo.muted = app.screenShare.presenterId === app.selfId;
+    if (screenStream) screenVideo.play().catch(() => undefined);
+  }
   stage.classList.toggle('show-self', showSelf);
   stage.classList.toggle('show-friends', showFriends);
   stage.classList.toggle('both-hidden', !showSelf && !showFriends);
@@ -765,8 +1234,32 @@ function renderPipCallView() {
 
   const mic = $('[data-action="mic"]', doc);
   const camera = $('[data-action="camera"]', doc);
-  if (mic) { mic.textContent = app.mediaAvailable.audio ? (app.mediaEnabled.audio ? 'Mic' : 'Unmute') : 'No mic'; mic.disabled = !app.mediaAvailable.audio; }
-  if (camera) { camera.textContent = app.mediaAvailable.video ? (app.mediaEnabled.video ? 'Camera' : 'Camera on') : 'No cam'; camera.disabled = !app.mediaAvailable.video; }
+  const share = $('[data-action="share"]', doc);
+  if (mic) {
+    mic.textContent = app.mediaAvailable.audio ? (app.mediaEnabled.audio ? 'Mic' : 'Unmute') : 'Add mic';
+    mic.disabled = false;
+    mic.title = app.mediaAvailable.audio ? (app.mediaEnabled.audio ? 'Mute microphone' : 'Unmute microphone') : 'Connect or select a microphone';
+  }
+  if (share) {
+    share.textContent = app.localScreenStream ? 'Stop share' : app.screenShare.active ? 'Sharing' : 'Share';
+    share.disabled = app.screenShare.active && app.screenShare.presenterId !== app.selfId;
+  }
+  if (camera) {
+    camera.textContent = app.mediaAvailable.video ? (app.mediaEnabled.video ? 'Camera' : 'Camera on') : 'Add camera';
+    camera.disabled = false;
+    camera.title = app.mediaAvailable.video ? (app.mediaEnabled.video ? 'Turn camera off' : 'Turn camera on') : 'Connect or select a camera';
+  }
+}
+
+async function openDevicesFromPip() {
+  try {
+    app.pipWindow?.close();
+    app.pipWindow = null;
+    const current = await chrome.windows.getCurrent();
+    await chrome.windows.update(current.id, { state: 'normal', focused: true });
+  } catch { /* The Cinema window may already be visible. */ }
+  setCinemaDevicePanel(true);
+  await refreshCinemaDevices({ announce: true });
 }
 
 async function restoreFullControls() {
@@ -800,12 +1293,16 @@ function leaveRoom() {
 }
 
 function stopAllMedia() {
+  stopCinemaScreenShare(false);
   clearInterval(app.heartbeat);
   clearInterval(app.poller);
   clearTimeout(app.reconnectTimer);
   for (const peer of app.peers.values()) peer.close();
   app.peers.clear();
   app.remoteStreams.clear();
+  app.remoteScreenStreams.clear();
+  app.peerStreamRegistry.clear();
+  app.screenSenders.clear();
   elements.remoteAudio.replaceChildren();
   app.localStream?.getTracks().forEach((track) => track.stop());
   app.localStream = null;

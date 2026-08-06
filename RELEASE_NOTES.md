@@ -1,37 +1,57 @@
-# APS Watch Together v1.3.0 — Flexible Device Modes
+# APS Watch Together v1.5.1 — Collaboration + Prime Stability Update
 
-## New participation modes
+## Existing features preserved
 
-- **Video + Audio:** full camera and microphone call.
-- **Audio only:** joins without requiring a camera.
-- **Video only:** joins without requiring a microphone.
-- **Watch only:** joins with no camera or microphone while playback sync, chat and reactions continue.
+- Netflix-safe Play, Pause, Seek, ±10 seconds and Resync
+- Prime Video and ZEE5 adapters
+- Host-only or shared playback control
+- Room lock, chat and reactions
+- Camera/microphone attach, recovery and device switching without rejoining
+- Watch-only/audio-only/video-only/full call modes
+- Cinema Mode, floating call and independent Me/Friends visibility
 
-## Missing-device resilience
 
-- Camera and microphone are requested independently.
-- A missing camera no longer blocks a working microphone.
-- A missing microphone no longer blocks a working camera.
-- If neither selected device exists, the participant automatically continues in Watch-only operation.
-- The permission page includes a clear **Continue in Watch only mode** option.
-- Device buttons are disabled and labelled when no corresponding device is active.
+## Prime Video stability fix
 
-## Receive-only calling
+- Adds a dedicated Prime Video bridge running in the page context.
+- Play and Pause change only playback state; they no longer combine the action with an immediate raw timestamp write.
+- Seeks are clamped to playable ranges and used only when drift is large enough.
+- Temporary playback-rate correction is disabled on Prime Video to reduce buffering and player-state churn.
+- The adapter prefers the full movie/episode player over short previews, promos or advertising videos.
+- Refresh and in-site navigation events are suppressed briefly so automatic player startup does not broadcast false Play/Pause commands to the room.
+- Duplicate commands are ignored safely during reconnects.
 
-- Adds receive-only WebRTC audio/video transceivers when the participant sends no local track.
-- Watch-only participants can still see friends' cameras and hear friends' audio.
-- Audio-only and video-only participants can still receive both remote audio and video.
-- Cinema Mode and the floating call window preserve the selected participation mode.
+Netflix handling remains unchanged from the working Netflix-safe version. ZEE5 handling is also unchanged.
 
-## Retained features and fixes
+## Screen sharing
 
-- Netflix-safe Play, Pause, Seek and Resync bridge.
-- Separate Me/Friends show-hide controls.
-- Movable always-on-top floating call window.
-- macOS full-tab permission flow.
-- Host handoff, room locking, chat and reactions.
-- Existing Render room server remains compatible; no redeployment is required for extension use.
+- Share a Chrome tab, application window or full display using Chrome's secure picker.
+- Camera and microphone calls continue while presenting.
+- One participant presents at a time to keep the room organized.
+- Host or presenter can stop the active presentation.
+- Viewers can hide or show the shared screen locally without interrupting it for others.
+- The presenter can stop from APS or Chrome's native sharing indicator.
+- Shared media is peer-to-peer and is not recorded or stored by APS.
 
-## Testing boundary
+## Direct room invitations
 
-Static validation and all six room-server integration tests pass. Physical no-camera/no-microphone laptops and live OTT accounts are still required for final real-device confirmation.
+- Adds a separate **Invite** button beside the room code.
+- Copies or shares a direct `/join/ROOM-CODE` HTTPS link.
+- Adds a professional server-hosted invitation page showing live room availability.
+- With v1.5.1 installed, clicking the page's button opens APS and preloads the room.
+- Traditional room-code joining remains unchanged.
+
+## Modern meeting layout
+
+- Reorganizes call actions into labeled Mic, Camera, Share, Devices and Cinema controls.
+- Uses a responsive Meet-style camera grid when no presentation is active.
+- Moves cameras into a compact organized dock when viewing a shared screen.
+- Keeps local and friend video cards visually consistent and clearly labeled.
+
+## Deployment requirement
+
+Unlike extension-only updates, v1.5.1 adds a server invitation route and screen-presenter state. Upload the full v1.5.1 source to GitHub and wait for Render to redeploy before using direct invite links or screen-sharing coordination. Every participant should replace the old unpacked extension with v1.5.1.
+
+## DRM boundary
+
+Screen sharing does not bypass DRM. Protected Netflix, Prime Video or ZEE5 movie video may appear black or error when captured. Use screen share for normal tabs, documents, photos, setup and collaboration while everyone watches the movie locally through their own account.
