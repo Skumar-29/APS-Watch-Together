@@ -196,7 +196,7 @@ const server = http.createServer((req, res) => {
 
   if (url.pathname === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ ok: true, service: 'aps-watch-together', rooms: rooms.size, clients: clients.size, now: new Date().toISOString() }));
+    res.end(JSON.stringify({ ok: true, service: 'aps-watch-together', version: '1.6.0', rooms: rooms.size, clients: clients.size, now: new Date().toISOString() }));
     return;
   }
 
@@ -297,6 +297,24 @@ function handleMessage(client, message) {
     case 'room-lock':
       updateRoomLock(client, message);
       break;
+    case 'entry-policy':
+      updateEntryPolicy(client, message);
+      break;
+    case 'admit-participant':
+      admitWaitingParticipant(client, message);
+      break;
+    case 'reject-participant':
+      rejectWaitingParticipant(client, message);
+      break;
+    case 'remove-participant':
+      removeParticipantByHost(client, message);
+      break;
+    case 'mute-participant':
+      muteParticipantByHost(client, message);
+      break;
+    case 'ask-to-unmute':
+      askParticipantToUnmute(client, message);
+      break;
     case 'chat':
       relayChat(client, message);
       break;
@@ -327,6 +345,8 @@ function createRoom(client) {
     hostTransferDueAt: 0,
     locked: false,
     everyoneCanControl: false,
+    waitingRoom: false,
+    waiting: new Map(),
     clients: new Map(),
     createdAt: Date.now(),
     lastActivityAt: Date.now(),
@@ -347,8 +367,31 @@ function joinRoom(client, suppliedCode) {
   const isReturningHost = room.hostSessionId === client.sessionId;
   if (room.locked && !isReturningHost) return sendError(client, 'This room is locked by the host.');
   if (room.clients.size >= MAX_ROOM_SIZE && !room.clients.has(client.id)) return sendError(client, 'This room is full.');
+  if (room.waitingRoom && !isReturningHost) {
+    const prior = [...room.waiting.values()].find((member) => member.sessionId === client.sessionId);
+    if (prior && prior.id !== client.id) { room.waiting.delete(prior.id); prior.ws.close(4001, 'Waiting session replaced'); }
+    room.waiting.set(client.id, client);
+    client.pendingRoomCode = roomCode;
+    send(client, { type: 'waiting-room', roomCode, message: 'Waiting for the host to admit you.' });
+    sendWaitingUpdate(room);
+    return;
+  }
+
+  // A participant identity is tied to sessionId, not to a particular panel/window.
+  // Reopening APS, switching OTT tabs, or restoring Cinema replaces the older
+  // connection instead of creating duplicate video/audio peers.
+  const duplicate = [...room.clients.values()].find((member) => member.sessionId === client.sessionId && member.id !== client.id);
+  const previousJoinedAt = duplicate?.connectedAt || client.connectedAt;
+  if (duplicate) {
+    room.clients.delete(duplicate.id);
+    duplicate.roomCode = '';
+    send(duplicate, { type: 'session-replaced', replacementId: client.id });
+    duplicate.ws.close(4001, 'Session replaced by a newer APS view');
+    broadcast(room, { type: 'participant-replaced', oldParticipantId: duplicate.id, participant: publicParticipant(client) });
+  }
 
   leaveRoom(client, true);
+  client.connectedAt = previousJoinedAt;
   room.clients.set(client.id, client);
   room.emptyAt = null;
   room.lastActivityAt = Date.now();
@@ -454,6 +497,77 @@ function updateRoomLock(client, message) {
   broadcast(room, { type: 'room-lock', locked: room.locked });
 }
 
+function updateEntryPolicy(client, message) {
+  const room = getClientRoom(client);
+  if (!room) return sendError(client, 'Join a room first.');
+  if (client.id !== room.hostId) return sendError(client, 'Only the host can change entry settings.');
+  room.waitingRoom = Boolean(message.waitingRoom);
+  broadcast(room, { type: 'entry-policy', waitingRoom: room.waitingRoom });
+  sendWaitingUpdate(room);
+}
+
+function sendWaitingUpdate(room) {
+  const host = room.clients.get(room.hostId);
+  if (!host) return;
+  send(host, { type: 'waiting-update', waiting: [...room.waiting.values()].map(publicParticipant) });
+}
+
+function admitWaitingParticipant(client, message) {
+  const room = getClientRoom(client);
+  if (!room || client.id !== room.hostId) return sendError(client, 'Only the host can admit participants.');
+  const target = room.waiting.get(String(message.participantId || ''));
+  if (!target) return;
+  room.waiting.delete(target.id);
+  target.pendingRoomCode = '';
+  const enabled = room.waitingRoom;
+  room.waitingRoom = false;
+  joinRoom(target, room.code);
+  room.waitingRoom = enabled;
+  sendWaitingUpdate(room);
+}
+
+function rejectWaitingParticipant(client, message) {
+  const room = getClientRoom(client);
+  if (!room || client.id !== room.hostId) return sendError(client, 'Only the host can reject participants.');
+  const target = room.waiting.get(String(message.participantId || ''));
+  if (!target) return;
+  room.waiting.delete(target.id);
+  target.pendingRoomCode = '';
+  send(target, { type: 'waiting-rejected', message: 'The host did not admit this request.' });
+  sendWaitingUpdate(room);
+}
+
+function removeParticipantByHost(client, message) {
+  const room = getClientRoom(client);
+  if (!room) return sendError(client, 'Join a room first.');
+  if (client.id !== room.hostId) return sendError(client, 'Only the host can remove participants.');
+  const targetId = String(message.participantId || '');
+  if (!targetId || targetId === client.id) return sendError(client, 'Choose another participant.');
+  const target = room.clients.get(targetId);
+  if (!target) return;
+  send(target, { type: 'removed-from-room', reason: 'The host removed you from this room.' });
+  leaveRoom(target, true);
+  target.ws.close(4003, 'Removed by host');
+}
+
+function muteParticipantByHost(client, message) {
+  const room = getClientRoom(client);
+  if (!room) return sendError(client, 'Join a room first.');
+  if (client.id !== room.hostId) return sendError(client, 'Only the host can mute participants.');
+  const target = room.clients.get(String(message.participantId || ''));
+  if (!target || target.id === client.id) return;
+  send(target, { type: 'host-mute', byName: client.name });
+}
+
+function askParticipantToUnmute(client, message) {
+  const room = getClientRoom(client);
+  if (!room) return sendError(client, 'Join a room first.');
+  if (client.id !== room.hostId) return sendError(client, 'Only the host can request unmute.');
+  const target = room.clients.get(String(message.participantId || ''));
+  if (!target || target.id === client.id) return;
+  send(target, { type: 'ask-to-unmute', byName: client.name });
+}
+
 function relayChat(client, message) {
   const room = getClientRoom(client);
   if (!room) return sendError(client, 'Join a room first.');
@@ -508,6 +622,7 @@ function relayScreenShareState(client, message) {
 
 function disconnectClient(client) {
   if (!clients.has(client.id)) return;
+  if (client.pendingRoomCode) { const pendingRoom = rooms.get(client.pendingRoomCode); pendingRoom?.waiting.delete(client.id); if (pendingRoom) sendWaitingUpdate(pendingRoom); client.pendingRoomCode = ''; }
   leaveRoom(client, false);
   clients.delete(client.id);
 }
@@ -519,6 +634,8 @@ function roomPayload(type, room, client) {
     selfId: client.id,
     hostId: room.hostId,
     locked: room.locked,
+    waitingRoom: room.waitingRoom,
+    waiting: client.id === room.hostId ? [...room.waiting.values()].map(publicParticipant) : [],
     everyoneCanControl: room.everyoneCanControl,
     screenShare: room.screenShare || inactiveScreenShare(),
     participants: [...room.clients.values()].map(publicParticipant),
@@ -527,7 +644,7 @@ function roomPayload(type, room, client) {
 }
 
 function publicParticipant(client) {
-  return { id: client.id, name: client.name, media: client.media, joinedAt: client.connectedAt };
+  return { id: client.id, sessionId: client.sessionId, name: client.name, media: client.media, joinedAt: client.connectedAt };
 }
 
 function sanitizePlayback(input) {
@@ -543,7 +660,8 @@ function sanitizePlayback(input) {
     paused: Boolean(input.paused),
     rate: finiteNumber(input.rate, 1, 0.25, 4),
     title: String(input.title || '').slice(0, 180),
-    service: String(input.service || '').slice(0, 30)
+    service: String(input.service || '').slice(0, 30),
+    url: sanitizeProviderUrl(input.url)
   };
   if (kind === 'skip') command.amount = finiteNumber(input.amount, 0, -600, 600);
   return command;
@@ -568,6 +686,17 @@ function allowMessage(client) {
 
 function inactiveScreenShare() {
   return { active: false, presenterId: '', presenterName: '', streamId: '', startedAt: 0 };
+}
+
+function sanitizeProviderUrl(value) {
+  try {
+    const url = new URL(String(value || ''));
+    const host = url.hostname.replace(/^www\./, '');
+    const allowed = ['netflix.com', 'primevideo.com', 'amazon.com', 'amazon.co.uk', 'amazon.in', 'amazon.com.au', 'zee5.com'];
+    if (url.protocol !== 'https:' || !allowed.some((domain) => host === domain || host.endsWith(`.${domain}`))) return '';
+    url.hash = '';
+    return url.toString().slice(0, 1000);
+  } catch { return ''; }
 }
 
 function cleanStreamId(value) {

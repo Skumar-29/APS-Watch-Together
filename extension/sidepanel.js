@@ -71,7 +71,11 @@ const app = {
   screenSenders: new Map(),
   screenViewHidden: false,
   screenOperation: false,
-  stoppingScreenShare: false
+  stoppingScreenShare: false,
+  focusedParticipantId: '',
+  presentationMaximized: false,
+  waitingRoom: false,
+  waitingParticipants: []
 };
 
 const elements = {
@@ -82,11 +86,11 @@ const elements = {
   roleBadge: $('#roleBadge'), leaveRoomBtn: $('#leaveRoomBtn'), serviceBadge: $('#serviceBadge'), syncBadge: $('#syncBadge'),
   mediaTitle: $('#mediaTitle'), currentTimeText: $('#currentTimeText'), durationText: $('#durationText'), timeline: $('#timeline'), timelineFill: $('#timelineFill'),
   rewindBtn: $('#rewindBtn'), playPauseBtn: $('#playPauseBtn'), playPauseIcon: $('#playPauseIcon'), forwardBtn: $('#forwardBtn'),
-  resyncBtn: $('#resyncBtn'), playerMessage: $('#playerMessage'), participantCount: $('#participantCount'), peopleCountPill: $('#peopleCountPill'),
+  resyncBtn: $('#resyncBtn'), playerMessage: $('#playerMessage'), openHostMovieBtn: $('#openHostMovieBtn'), participantCount: $('#participantCount'), peopleCountPill: $('#peopleCountPill'),
   videoGrid: $('#videoGrid'), localVideoCard: $('#localVideoCard'), localVideo: $('#localVideo'), localFallback: $('#localFallback'), localInitial: $('#localInitial'),
-  cinemaModeBtn: $('#cinemaModeBtn'), screenShareBtn: $('#screenShareBtn'), screenStage: $('#screenStage'), screenVideo: $('#screenVideo'), screenFallback: $('#screenFallback'), screenPresenterName: $('#screenPresenterName'), screenStatusText: $('#screenStatusText'), screenViewToggleBtn: $('#screenViewToggleBtn'), screenStopBtn: $('#screenStopBtn'), screenHiddenBar: $('#screenHiddenBar'), screenHiddenText: $('#screenHiddenText'), callSettingsBtn: $('#callSettingsBtn'), closeCallSettingsBtn: $('#closeCallSettingsBtn'), callSettingsPanel: $('#callSettingsPanel'), deviceStatusBanner: $('#deviceStatusBanner'), deviceStatusText: $('#deviceStatusText'), cameraDeviceSelect: $('#cameraDeviceSelect'), micDeviceSelect: $('#micDeviceSelect'), speakerDeviceSelect: $('#speakerDeviceSelect'), speakerDeviceField: $('#speakerDeviceField'), callQualitySelect: $('#callQualitySelect'), refreshDevicesBtn: $('#refreshDevicesBtn'), applyDevicesBtn: $('#applyDevicesBtn'), toggleMicBtn: $('#toggleMicBtn'), toggleCameraBtn: $('#toggleCameraBtn'), localMicState: $('#localMicState'), localModeLabel: $('#localModeLabel'), peopleTabBtn: $('#peopleTabBtn'),
-  chatTabBtn: $('#chatTabBtn'), peoplePanel: $('#peoplePanel'), chatPanel: $('#chatPanel'), peopleList: $('#peopleList'), unreadPill: $('#unreadPill'),
-  sharedControlsToggle: $('#sharedControlsToggle'), roomLockToggle: $('#roomLockToggle'), chatForm: $('#chatForm'), chatInput: $('#chatInput'), messages: $('#messages'),
+  cinemaModeBtn: $('#cinemaModeBtn'), screenShareBtn: $('#screenShareBtn'), screenStage: $('#screenStage'), screenVideo: $('#screenVideo'), screenFallback: $('#screenFallback'), screenPresenterName: $('#screenPresenterName'), screenStatusText: $('#screenStatusText'), screenFitBtn: $('#screenFitBtn'), screenFullscreenBtn: $('#screenFullscreenBtn'), screenViewToggleBtn: $('#screenViewToggleBtn'), screenStopBtn: $('#screenStopBtn'), screenHiddenBar: $('#screenHiddenBar'), screenHiddenText: $('#screenHiddenText'), callSettingsBtn: $('#callSettingsBtn'), closeCallSettingsBtn: $('#closeCallSettingsBtn'), callSettingsPanel: $('#callSettingsPanel'), deviceStatusBanner: $('#deviceStatusBanner'), deviceStatusText: $('#deviceStatusText'), cameraDeviceSelect: $('#cameraDeviceSelect'), micDeviceSelect: $('#micDeviceSelect'), speakerDeviceSelect: $('#speakerDeviceSelect'), speakerDeviceField: $('#speakerDeviceField'), callQualitySelect: $('#callQualitySelect'), refreshDevicesBtn: $('#refreshDevicesBtn'), applyDevicesBtn: $('#applyDevicesBtn'), toggleMicBtn: $('#toggleMicBtn'), toggleCameraBtn: $('#toggleCameraBtn'), localMicState: $('#localMicState'), localModeLabel: $('#localModeLabel'), peopleTabBtn: $('#peopleTabBtn'),
+  chatTabBtn: $('#chatTabBtn'), peoplePanel: $('#peoplePanel'), chatPanel: $('#chatPanel'), peopleList: $('#peopleList'), galleryViewBtn: $('#galleryViewBtn'), unreadPill: $('#unreadPill'),
+  sharedControlsToggle: $('#sharedControlsToggle'), roomLockToggle: $('#roomLockToggle'), waitingRoomToggle: $('#waitingRoomToggle'), waitingRoomList: $('#waitingRoomList'), chatForm: $('#chatForm'), chatInput: $('#chatInput'), messages: $('#messages'),
   toastRegion: $('#toastRegion'), reactionLayer: $('#reactionLayer')
 };
 
@@ -170,10 +174,13 @@ function bindEvents() {
   elements.rewindBtn.addEventListener('click', () => sendLocalControl({ kind: 'skip', amount: -10 }));
   elements.forwardBtn.addEventListener('click', () => sendLocalControl({ kind: 'skip', amount: 10 }));
   elements.resyncBtn.addEventListener('click', forceResync);
+  elements.openHostMovieBtn.addEventListener('click', openHostMovie);
   elements.timeline.addEventListener('click', seekFromTimeline);
   elements.timeline.addEventListener('keydown', seekTimelineWithKeyboard);
   elements.cinemaModeBtn.addEventListener('click', startCinemaMode);
   elements.screenShareBtn.addEventListener('click', toggleScreenShare);
+  elements.screenFitBtn.addEventListener('click', togglePresentationMaximize);
+  elements.screenFullscreenBtn.addEventListener('click', enterPresentationFullscreen);
   elements.screenViewToggleBtn.addEventListener('click', toggleScreenView);
   elements.screenHiddenBar.addEventListener('click', toggleScreenView);
   elements.screenStopBtn.addEventListener('click', () => stopScreenShare(true));
@@ -187,10 +194,15 @@ function bindEvents() {
   elements.callQualitySelect.addEventListener('change', () => { app.settings.videoQuality = elements.callQualitySelect.value; });
   elements.toggleMicBtn.addEventListener('click', toggleMicrophone);
   elements.toggleCameraBtn.addEventListener('click', toggleCamera);
+  elements.videoGrid.addEventListener('click', handleVideoGridClick);
+  elements.galleryViewBtn.addEventListener('click', clearParticipantFocus);
+  elements.peopleList.addEventListener('click', handlePeopleAction);
   elements.peopleTabBtn.addEventListener('click', () => setTab('people'));
   elements.chatTabBtn.addEventListener('click', () => setTab('chat'));
   elements.sharedControlsToggle.addEventListener('change', updateSharedControls);
   elements.roomLockToggle.addEventListener('change', updateRoomLock);
+  elements.waitingRoomToggle.addEventListener('change', updateWaitingRoomPolicy);
+  elements.waitingRoomList.addEventListener('click', handleWaitingAction);
   elements.chatForm.addEventListener('submit', sendChat);
   $$('.reaction-row button').forEach((button) => button.addEventListener('click', () => sendReaction(button.dataset.reaction)));
 
@@ -439,6 +451,26 @@ async function handleSocketMessage(message) {
       updateRole();
       toast(message.reconnecting ? `${message.name || 'The host'} is reconnecting…` : `${message.name || 'A friend'} left the room.`);
       break;
+    case 'participant-replaced':
+      removeParticipant(message.oldParticipantId);
+      addParticipant(message.participant);
+      if (message.participant.id !== app.selfId) await createPeerOffer(message.participant.id);
+      break;
+    case 'session-replaced':
+      toast('This older APS view was replaced by your newer window.', 'success');
+      app.intentionallyLeft = true;
+      app.socket?.close();
+      break;
+    case 'removed-from-room':
+      toast(message.reason || 'The host removed you from the room.', 'error');
+      leaveRoom();
+      break;
+    case 'host-mute':
+      forceLocalMute(message.byName || 'The host');
+      break;
+    case 'ask-to-unmute':
+      showAskToUnmute(message.byName || 'The host');
+      break;
     case 'signal':
       await handleSignal(message.fromId, message.signal);
       break;
@@ -455,6 +487,24 @@ async function handleSocketMessage(message) {
       app.sharedControls = Boolean(message.everyoneCanControl);
       elements.sharedControlsToggle.checked = app.sharedControls;
       updateControlPermissions();
+      break;
+    case 'waiting-room':
+      showWaitingOverlay(message.message || 'Waiting for the host to admit you.');
+      break;
+    case 'waiting-rejected':
+      hideWaitingOverlay();
+      setBusy(false);
+      toast(message.message || 'The host did not admit the request.', 'error');
+      app.roomCode = '';
+      break;
+    case 'waiting-update':
+      app.waitingParticipants = Array.isArray(message.waiting) ? message.waiting : [];
+      renderWaitingRoom();
+      if (app.waitingParticipants.length) toast(`${app.waitingParticipants.length} friend${app.waitingParticipants.length === 1 ? '' : 's'} waiting to join.`, 'success');
+      break;
+    case 'entry-policy':
+      app.waitingRoom = Boolean(message.waitingRoom);
+      elements.waitingRoomToggle.checked = app.waitingRoom;
       break;
     case 'room-lock':
       app.roomLocked = Boolean(message.locked);
@@ -498,6 +548,8 @@ function enterRoom(message) {
   app.hostId = message.hostId;
   app.sharedControls = Boolean(message.everyoneCanControl);
   app.roomLocked = Boolean(message.locked);
+  app.waitingRoom = Boolean(message.waitingRoom);
+  app.waitingParticipants = Array.isArray(message.waiting) ? message.waiting : [];
   app.screenShare = message.screenShare || inactiveScreenShare();
   for (const pc of app.peerConnections.values()) pc.close();
   app.peerConnections.clear();
@@ -521,6 +573,9 @@ function enterRoom(message) {
   elements.roomCodeText.textContent = formatRoomCode(app.roomCode);
   elements.sharedControlsToggle.checked = app.sharedControls;
   elements.roomLockToggle.checked = app.roomLocked;
+  elements.waitingRoomToggle.checked = app.waitingRoom;
+  hideWaitingOverlay();
+  renderWaitingRoom();
   setBusy(false);
   setView('room');
   updateRole();
@@ -560,9 +615,13 @@ function updateRoomState(message) {
   if (Object.prototype.hasOwnProperty.call(message, 'hostId')) app.hostId = message.hostId;
   app.sharedControls = Boolean(message.everyoneCanControl);
   app.roomLocked = Boolean(message.locked);
+  if (Object.prototype.hasOwnProperty.call(message, 'waitingRoom')) app.waitingRoom = Boolean(message.waitingRoom);
+  if (Array.isArray(message.waiting)) app.waitingParticipants = message.waiting;
   if (message.screenShare) handleScreenShareState(message.screenShare, false);
   elements.sharedControlsToggle.checked = app.sharedControls;
   elements.roomLockToggle.checked = app.roomLocked;
+  elements.waitingRoomToggle.checked = app.waitingRoom;
+  renderWaitingRoom();
   if (Array.isArray(message.participants)) {
     const incoming = new Set(message.participants.map((p) => p.id));
     for (const id of app.participants.keys()) if (!incoming.has(id)) removeParticipant(id);
@@ -605,6 +664,8 @@ function updateRole() {
   elements.roleBadge.className = `badge ${app.isHost ? 'host' : 'guest'}`;
   elements.sharedControlsToggle.disabled = !app.isHost;
   elements.roomLockToggle.disabled = !app.isHost;
+  elements.waitingRoomToggle.disabled = !app.isHost;
+  renderWaitingRoom();
   elements.sharedControlsToggle.closest('.control-policy')?.classList.toggle('disabled', !app.isHost);
   elements.roomLockToggle.closest('.control-policy')?.classList.toggle('disabled', !app.isHost);
   updateControlPermissions();
@@ -1172,7 +1233,8 @@ function handleLocalPlayerEvent(event) {
     paused: event.paused,
     rate: event.playbackRate || 1,
     title: event.title,
-    service: event.service
+    service: event.service,
+    url: event.url || app.player?.url || ''
   });
 }
 
@@ -1219,7 +1281,8 @@ async function sendLocalControl(command) {
     paused: current?.paused,
     rate: current?.playbackRate || 1,
     title: current?.title,
-    service: current?.service
+    service: current?.service,
+    url: current?.url || app.player?.url || ''
   };
   if (command.kind === 'skip') outbound.kind = 'seek';
   broadcastPlayback(outbound);
@@ -1287,11 +1350,13 @@ async function applyRemotePlayback(message) {
   if (app.player?.ready && command.service && app.player.service && command.service !== app.player.service) {
     setSyncState('error', 'Wrong service');
     toast(`The host is using ${command.service}. Open the same streaming service.`, 'error');
+    updateOpenHostMovieButton(command);
     return;
   }
   if (app.player?.ready && titlesClearlyConflict(app.player.title, command.title)) {
     setSyncState('error', 'Different title');
     toast(`Open the same movie or episode as the host: ${command.title || 'host title'}.`, 'error');
+    updateOpenHostMovieButton(command);
     return;
   }
 
@@ -1303,6 +1368,23 @@ async function applyRemotePlayback(message) {
   }
   if (response.result?.status) handlePlayerStatus(response.result.status);
   setSyncState('synced', 'In sync');
+  elements.openHostMovieBtn.hidden = true;
+}
+
+function updateOpenHostMovieButton(command) {
+  const url = String(command?.url || '');
+  if (!/^https:\/\//i.test(url)) { elements.openHostMovieBtn.hidden = true; return; }
+  elements.openHostMovieBtn.hidden = false;
+  elements.openHostMovieBtn.dataset.url = url;
+  const service = String(command.service || 'movie').replace(/[-_]/g, ' ');
+  elements.openHostMovieBtn.textContent = `Open on ${service}`;
+}
+
+async function openHostMovie() {
+  const url = elements.openHostMovieBtn.dataset.url;
+  if (!url) return;
+  await chrome.tabs.create({ url });
+  toast('Movie opened. Start it once, then APS will resync you.', 'success');
 }
 
 function forceResync() {
@@ -1313,7 +1395,8 @@ function forceResync() {
     paused: app.player.paused !== false,
     rate: app.player.playbackRate || 1,
     title: app.player.title,
-    service: app.player.service
+    service: app.player.service,
+    url: app.player.url || ''
   });
   toast('Resync sent to everyone.', 'success');
 }
@@ -1348,6 +1431,41 @@ function updateRoomLock() {
   sendSocket({ type: 'room-lock', locked: app.roomLocked });
 }
 
+function updateWaitingRoomPolicy() {
+  if (!app.isHost) return;
+  app.waitingRoom = elements.waitingRoomToggle.checked;
+  sendSocket({ type: 'entry-policy', waitingRoom: app.waitingRoom });
+}
+
+function renderWaitingRoom() {
+  if (!elements.waitingRoomList) return;
+  const visible = app.isHost && app.waitingParticipants.length > 0;
+  elements.waitingRoomList.hidden = !visible;
+  elements.waitingRoomList.innerHTML = visible ? app.waitingParticipants.map((person) => `<div class="waiting-person"><strong>${escapeHtml(person.name || 'Guest')}</strong><div class="waiting-actions"><button class="admit" data-waiting-action="admit" data-participant-id="${escapeHtml(person.id)}">Admit</button><button class="reject" data-waiting-action="reject" data-participant-id="${escapeHtml(person.id)}">Reject</button></div></div>`).join('') : '';
+}
+
+function handleWaitingAction(event) {
+  const button = event.target.closest('[data-waiting-action]');
+  if (!button || !app.isHost) return;
+  const type = button.dataset.waitingAction === 'admit' ? 'admit-participant' : 'reject-participant';
+  sendSocket({ type, participantId: button.dataset.participantId });
+}
+
+function showWaitingOverlay(message) {
+  let overlay = document.querySelector('[data-waiting-overlay]');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.className = 'waiting-overlay';
+    overlay.dataset.waitingOverlay = '1';
+    overlay.innerHTML = `<div class="waiting-overlay-card"><div style="font-size:28px">⏳</div><h3>Waiting room</h3><p data-waiting-message></p><button type="button" data-cancel-wait>Cancel</button></div>`;
+    document.body.appendChild(overlay);
+    overlay.querySelector('[data-cancel-wait]').addEventListener('click', () => { app.intentionallyLeft = true; app.socket?.close(); app.roomCode = ''; hideWaitingOverlay(); setBusy(false); });
+  }
+  overlay.querySelector('[data-waiting-message]').textContent = message;
+}
+
+function hideWaitingOverlay() { document.querySelector('[data-waiting-overlay]')?.remove(); }
+
 function updateParticipantUI() {
   const count = app.participants.size || 1;
   elements.participantCount.textContent = `${count} participant${count === 1 ? '' : 's'}`;
@@ -1367,6 +1485,10 @@ function renderPeople() {
     const isHost = participant.id === app.hostId;
     const media = isSelf ? app.mediaEnabled : (participant.media || {});
     const status = isSelf ? 'You' : connectionText(participant.connectionState);
+    const hostActions = app.isHost && !isSelf ? `<div class="person-actions">
+      <button type="button" data-person-action="${media.audio === false ? 'ask-unmute' : 'mute'}" data-participant-id="${escapeHtml(participant.id)}">${media.audio === false ? 'Ask unmute' : 'Mute'}</button>
+      <button type="button" class="danger" data-person-action="remove" data-participant-id="${escapeHtml(participant.id)}">Remove</button>
+    </div>` : '';
     return `<div class="person-row">
       <div class="person-main">
         <div class="person-avatar">${escapeHtml(initialOf(participant.name))}</div>
@@ -1375,9 +1497,39 @@ function renderPeople() {
       <div class="person-icons" aria-label="Media status">
         <span style="opacity:${media.audio === false ? .3 : 1}">${ICONS.micSmall}</span>
         <span style="opacity:${media.video === false ? .3 : 1}">${ICONS.cameraSmall}</span>
-      </div>
+      </div>${hostActions}
     </div>`;
   }).join('');
+}
+
+function handlePeopleAction(event) {
+  const button = event.target.closest('[data-person-action]');
+  if (!button || !app.isHost) return;
+  const participantId = button.dataset.participantId;
+  const action = button.dataset.personAction;
+  if (action === 'remove') {
+    if (confirm('Remove this participant from the room?')) sendSocket({ type: 'remove-participant', participantId });
+  } else if (action === 'mute') sendSocket({ type: 'mute-participant', participantId });
+  else if (action === 'ask-unmute') sendSocket({ type: 'ask-to-unmute', participantId });
+}
+
+function forceLocalMute(byName) {
+  const track = app.localStream?.getAudioTracks?.()[0];
+  if (track) track.enabled = false;
+  app.mediaEnabled.audio = false;
+  app.mediaIntent.audio = false;
+  applyLocalMediaState(true);
+  toast(`${byName} muted your microphone.`, 'error');
+}
+
+function showAskToUnmute(byName) {
+  const notice = document.createElement('div');
+  notice.className = 'chat-notice';
+  notice.innerHTML = `<strong>${escapeHtml(byName)} asked you to unmute</strong><div style="margin-top:8px;display:flex;gap:8px"><button data-unmute-now style="flex:1">Unmute</button><button data-dismiss>Not now</button></div>`;
+  document.body.appendChild(notice);
+  notice.querySelector('[data-unmute-now]').addEventListener('click', async () => { notice.remove(); if (!app.mediaEnabled.audio) await toggleMicrophone(); });
+  notice.querySelector('[data-dismiss]').addEventListener('click', () => notice.remove());
+  setTimeout(() => notice.remove(), 12000);
 }
 
 function connectionText(state) {
@@ -1407,7 +1559,21 @@ function appendMessage(message) {
     app.unread += 1;
     elements.unreadPill.textContent = String(app.unread);
     elements.unreadPill.classList.remove('hidden');
+    showMessageNotice(message);
   }
+}
+
+function showMessageNotice(message) {
+  const old = document.querySelector('.chat-notice[data-chat-notice]');
+  old?.remove();
+  const node = document.createElement('button');
+  node.type = 'button';
+  node.dataset.chatNotice = '1';
+  node.className = 'chat-notice';
+  node.innerHTML = `<strong>${escapeHtml(message.senderName || 'Friend')}</strong><div>${escapeHtml(String(message.text || '').slice(0, 90))}</div>`;
+  node.addEventListener('click', () => { node.remove(); setTab('chat'); });
+  document.body.appendChild(node);
+  setTimeout(() => node.remove(), 5000);
 }
 
 function sendReaction(emoji) {
@@ -1468,6 +1634,45 @@ function reconcilePeerStreams(peerId) {
   if (screenStream) app.remoteScreenStreams.set(peerId, screenStream);
   else app.remoteScreenStreams.delete(peerId);
   updateScreenShareUI();
+}
+
+function handleVideoGridClick(event) {
+  const card = event.target.closest('.video-card');
+  if (!card) return;
+  const participantId = card.id === 'localVideoCard' ? app.selfId : card.dataset.peerCard;
+  if (!participantId) return;
+  if (app.focusedParticipantId === participantId) clearParticipantFocus();
+  else focusParticipant(participantId);
+}
+
+function focusParticipant(participantId) {
+  app.focusedParticipantId = participantId;
+  elements.videoGrid.classList.add('focus-mode');
+  elements.videoGrid.querySelectorAll('.video-card').forEach((card) => {
+    const id = card.id === 'localVideoCard' ? app.selfId : card.dataset.peerCard;
+    card.classList.toggle('focused', id === participantId);
+  });
+  elements.galleryViewBtn.hidden = false;
+}
+
+function clearParticipantFocus() {
+  app.focusedParticipantId = '';
+  elements.videoGrid.classList.remove('focus-mode');
+  elements.videoGrid.querySelectorAll('.video-card').forEach((card) => card.classList.remove('focused'));
+  elements.galleryViewBtn.hidden = true;
+}
+
+function togglePresentationMaximize() {
+  app.presentationMaximized = !app.presentationMaximized;
+  elements.screenStage.classList.toggle('presentation-maximized', app.presentationMaximized);
+  elements.screenFitBtn.textContent = app.presentationMaximized ? 'Restore' : 'Maximise';
+}
+
+async function enterPresentationFullscreen() {
+  try {
+    if (document.fullscreenElement) await document.exitFullscreen();
+    else await elements.screenStage.requestFullscreen();
+  } catch { toast('Chrome could not enter full screen.', 'error'); }
 }
 
 async function toggleScreenShare() {

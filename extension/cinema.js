@@ -480,6 +480,29 @@ async function handleSocketMessage(message) {
       updateParticipantUI();
       renderRemoteViews();
       break;
+    case 'participant-replaced':
+      removeParticipant(message.oldParticipantId);
+      addParticipant(message.participant);
+      if (message.participant.id !== app.selfId) await createOffer(message.participant.id);
+      updateParticipantUI();
+      renderRemoteViews();
+      break;
+    case 'session-replaced':
+      elements.connectionText.textContent = 'This view was replaced by your newer APS window.';
+      app.closingForRestore = true;
+      app.socket?.close();
+      break;
+    case 'removed-from-room':
+      app.intentionallyLeaving = true;
+      elements.connectionText.textContent = message.reason || 'Removed by host';
+      setTimeout(() => leaveRoom(), 1200);
+      break;
+    case 'host-mute':
+      { const track = app.localStream?.getAudioTracks?.()[0]; if (track) track.enabled = false; app.mediaEnabled.audio = false; updateMediaState(); elements.hint.textContent = `${message.byName || 'The host'} muted your microphone.`; }
+      break;
+    case 'ask-to-unmute':
+      elements.hint.textContent = `${message.byName || 'The host'} asked you to unmute.`;
+      break;
     case 'participant-left':
       removeParticipant(message.participantId);
       if (Object.prototype.hasOwnProperty.call(message, 'hostId')) app.hostId = message.hostId;
@@ -1269,7 +1292,15 @@ async function restoreFullControls() {
   if (!response?.ok) {
     elements.restoreBtn.disabled = false;
     elements.connectionText.textContent = response?.error || 'Could not restore full controls.';
+    return;
   }
+  // Keep Cinema alive until the full panel confirms it has rejoined.
+  setTimeout(() => {
+    if (!app.closingForRestore) {
+      elements.restoreBtn.disabled = false;
+      elements.connectionText.textContent = 'Full controls did not open. Click again or use the APS toolbar icon.';
+    }
+  }, 9000);
 }
 
 function finishRestoreHandoff() {

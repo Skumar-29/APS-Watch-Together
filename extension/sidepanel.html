@@ -117,7 +117,7 @@
             <button id="forwardBtn" class="control-btn" type="button" title="Forward 10 seconds"><span>+10</span></button>
             <button id="resyncBtn" class="control-btn sync-control" type="button" title="Resync everyone"><svg viewBox="0 0 24 24"><path d="M17.7 6.3A8 8 0 0 0 4.3 9H2l3.5 4L9 9H6.4a6 6 0 1 1 .6 6.4l-1.5 1.3A8 8 0 1 0 17.7 6.3Z"/></svg></button>
           </div>
-          <div class="player-message" id="playerMessage">Open a movie in this tab to activate synchronized controls.</div>
+          <div class="player-message" id="playerMessage">Open a movie in this tab to activate synchronized controls.</div><button id="openHostMovieBtn" class="open-host-movie" type="button" hidden>Open host movie</button>
         </div>
 
         <div class="section-heading meeting-heading">
@@ -148,13 +148,13 @@
         <section id="screenStage" class="screen-stage" hidden>
           <div class="screen-stage-header">
             <div><span class="presenting-dot"></span><strong id="screenPresenterName">Screen share</strong><small id="screenStatusText">Connecting…</small></div>
-            <div class="screen-stage-actions"><button id="screenViewToggleBtn" type="button">Hide</button><button id="screenStopBtn" class="stop-share-btn" type="button" hidden>Stop sharing</button></div>
+            <div class="screen-stage-actions"><button id="screenFitBtn" type="button">Fit</button><button id="screenFullscreenBtn" type="button">Full screen</button><button id="screenViewToggleBtn" type="button">Hide</button><button id="screenStopBtn" class="stop-share-btn" type="button" hidden>Stop sharing</button></div>
           </div>
           <div class="screen-canvas"><video id="screenVideo" autoplay playsinline></video><div id="screenFallback" class="screen-fallback"><span>▣</span><strong>Connecting to shared screen…</strong></div></div>
         </section>
         <button id="screenHiddenBar" class="screen-hidden-bar" type="button" hidden><span class="presenting-dot"></span><strong id="screenHiddenText">A screen is being shared</strong><small>Show</small></button>
 
-        <div class="camera-layout-label"><span>Camera tiles</span><small>Automatically arranged like a meeting room</small></div>
+        <div class="camera-layout-label"><span>Camera tiles</span><small>Click any camera to focus it</small><button id="galleryViewBtn" class="gallery-view-btn" type="button" hidden>Return to gallery</button></div>
         <div id="videoGrid" class="video-grid meeting-grid">
           <article id="localVideoCard" class="video-card local-card">
             <video id="localVideo" autoplay muted playsinline></video>
@@ -178,6 +178,11 @@
             <span><strong>Lock room</strong><small>Stop additional people from joining</small></span>
             <input id="roomLockToggle" type="checkbox"><span class="switch"></span>
           </label>
+          <label class="control-policy">
+            <span><strong>Waiting room</strong><small>Host admits friends before they enter</small></span>
+            <input id="waitingRoomToggle" type="checkbox"><span class="switch"></span>
+          </label>
+          <div id="waitingRoomList" class="waiting-room-list" hidden></div>
         </section>
 
         <section id="chatPanel" class="tab-panel">

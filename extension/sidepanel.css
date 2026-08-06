@@ -276,3 +276,27 @@ main { padding: 14px; }
 .camera-layout-label{display:flex;align-items:flex-end;justify-content:space-between;margin:4px 2px 7px}.camera-layout-label span{font-size:10px;font-weight:800;color:#dbeafe}.camera-layout-label small{font-size:7px;color:#64748b}
 .video-grid.meeting-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;align-items:stretch}.video-grid.meeting-grid .video-card{min-width:0;aspect-ratio:4/3;border-radius:15px;box-shadow:0 12px 30px rgba(0,0,0,.24)}.video-grid.meeting-grid[data-count="1"]{grid-template-columns:1fr}.video-grid.meeting-grid[data-count="3"] .video-card:first-child{grid-column:1/-1;aspect-ratio:16/8.5}.video-grid.meeting-grid.screen-active{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(105px,132px);grid-template-columns:none;overflow-x:auto;padding:1px 0 5px;scrollbar-width:thin}.video-grid.meeting-grid.screen-active .video-card{aspect-ratio:1/1;min-height:105px}.video-grid.meeting-grid.screen-active .video-meta{font-size:8px}.video-grid.meeting-grid .local-card{order:20;border-color:rgba(139,92,246,.26)}.video-card{position:relative;overflow:hidden}.video-card::after{content:"";position:absolute;inset:55% 0 0;background:linear-gradient(transparent,rgba(2,6,23,.82));pointer-events:none}.video-card .video-meta{z-index:2}.video-card .peer-name{max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 @media(max-width:390px){.meeting-toolbar{grid-template-columns:repeat(5,minmax(54px,1fr));overflow-x:auto}.meeting-action{min-width:54px}.camera-layout-label small{display:none}}
+
+/* APS v1.6 meeting focus and presentation polish */
+.screen-stage.presentation-maximized{position:fixed;inset:0;z-index:1000;margin:0;border-radius:0;background:#05070d;padding:12px;display:flex;flex-direction:column}
+.screen-stage.presentation-maximized .screen-canvas{flex:1;min-height:0}
+.screen-stage.presentation-maximized .screen-canvas video{width:100%;height:100%;object-fit:contain}
+.gallery-view-btn{margin-left:auto;border:1px solid rgba(148,163,184,.22);background:rgba(15,23,42,.8);color:#e2e8f0;border-radius:10px;padding:6px 10px;font-size:11px;cursor:pointer}
+.video-grid.focus-mode .video-card{display:none}
+.video-grid.focus-mode .video-card.focused{display:block;grid-column:1/-1;min-height:270px}
+.video-grid.focus-mode .video-card.focused video{object-fit:contain;background:#05070d}
+.video-card{cursor:pointer;transition:transform .18s ease,border-color .18s ease,box-shadow .18s ease}
+.video-card:hover{border-color:rgba(103,232,249,.45);box-shadow:0 10px 28px rgba(0,0,0,.28)}
+.video-card.focused{border-color:rgba(139,92,246,.7)}
+.person-actions{display:flex;gap:5px;margin-left:8px}
+.person-actions button{border:1px solid rgba(148,163,184,.2);background:rgba(15,23,42,.78);color:#cbd5e1;border-radius:8px;padding:5px 7px;font-size:10px;cursor:pointer}
+.person-actions button.danger{color:#fecdd3;border-color:rgba(251,113,133,.3)}
+.person-row{gap:8px}
+.chat-notice{position:fixed;right:12px;bottom:14px;z-index:1100;max-width:290px;background:rgba(15,23,42,.96);border:1px solid rgba(139,92,246,.42);box-shadow:0 18px 50px rgba(0,0,0,.38);border-radius:13px;padding:10px 12px;color:#f8fafc;font-size:12px;animation:apsNoticeIn .2s ease}
+@keyframes apsNoticeIn{from{transform:translateY(8px);opacity:0}to{transform:none;opacity:1}}
+.waiting-room-list{margin-top:10px;padding:9px;border:1px solid rgba(251,191,36,.22);border-radius:12px;background:rgba(251,191,36,.05)}
+.waiting-person{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 4px}
+.waiting-person+.waiting-person{border-top:1px solid rgba(148,163,184,.12)}
+.waiting-person strong{font-size:12px}.waiting-actions{display:flex;gap:5px}.waiting-actions button{border:0;border-radius:8px;padding:6px 8px;font-size:10px;cursor:pointer}.waiting-actions .admit{background:#34d399;color:#052e24}.waiting-actions .reject{background:rgba(251,113,133,.16);color:#fecdd3}
+.waiting-overlay{position:fixed;inset:0;z-index:1200;display:grid;place-items:center;background:rgba(3,7,18,.82);padding:24px}.waiting-overlay-card{width:min(330px,100%);text-align:center;background:#111827;border:1px solid rgba(139,92,246,.35);border-radius:20px;padding:24px;box-shadow:0 30px 90px rgba(0,0,0,.55)}
+.open-host-movie{width:100%;margin-top:10px;border:1px solid rgba(34,211,238,.3);background:rgba(34,211,238,.08);color:#a5f3fc;border-radius:11px;padding:9px;font-weight:700;cursor:pointer}

@@ -1,53 +1,15 @@
-APS Watch Together v1.5.1 — Verification Report
-Generated: 6 August 2026
+APS Watch Together v1.6.0 verification
 
-RELEASE PURPOSE
-Preserves the working Netflix-safe v1.4.0 behavior and all v1.5.0 collaboration features, while replacing Prime Video's generic playback path with a dedicated stability adapter.
+PASS: JavaScript syntax validation for server, side panel, Cinema, background, content, Netflix and Prime bridges
+PASS: Manifest version 1.6.0
+PASS: 19 automated regression tests
+PASS: Netflix bridge preserved
+PASS: Prime Video stability bridge preserved
+PASS: duplicate-session replacement implemented server-side
+PASS: host mute / ask-to-unmute / remove message paths
+PASS: waiting-room admit/reject server paths
+PASS: screen presentation maximise/full-screen controls present
+PASS: participant focus/gallery controls present
+PASS: provider URL allow-list and Open host movie path
 
-AUTOMATED CHECKS PASSED
-1. JavaScript syntax validation for all extension, server, test and build files.
-2. Manifest V3 validation and version 1.5.1 verification.
-3. Netflix bridge preserved unchanged.
-4. Dedicated Prime Video MAIN-world bridge injected on Prime/Amazon video domains.
-5. Prime Pause changes only playback state and does not seek.
-6. Prime Play does not seek to a stale timestamp.
-7. Prime synchronization seeks only beyond a drift threshold.
-8. Prime synchronization keeps normal playback speed instead of temporary rate correction.
-9. Main movie/episode video is preferred over short previews, promos and advertising candidates.
-10. Refresh and in-site route changes suppress transient local player events.
-11. Duplicate playback commands are handled safely.
-12. Existing camera/microphone participation modes preserved.
-13. Existing live camera/microphone switching preserved in full and Cinema controls.
-14. Missing devices remain actionable without forcing a rejoin.
-15. Speaker routing and peer track replacement paths preserved.
-16. Direct invitation links and room-code joining preserved.
-17. Screen sharing and single-presenter enforcement preserved.
-18. Room creation, friend joining, playback relay, host transfer, reconnect recovery and room locking passed.
-19. Friend package contains the configured Render server and secure invitation-page permission.
-20. ZIP integrity and source-package integrity passed.
-
-TEST RESULT
-19 automated tests passed, 0 failed.
-
-PACKAGE VALIDATION
-- Friend extension version: 1.5.1
-- Configured server: wss://aps-watch-together-server.onrender.com/ws
-- Prime bridge included: yes
-- Netflix bridge included: yes
-- Invite-page permission included: yes
-
-IMPORTANT LIVE-TEST BOUNDARY
-This environment cannot sign in to Prime Video or Netflix, load the extension in the user's normal Chrome profile, or connect two physical laptops. The Prime adapter was validated with mocked player behavior and static integration checks, but the final confirmation must be performed using the user's and a friend's Prime Video accounts.
-
-RECOMMENDED PRIME LIVE TEST
-1. Both computers open the same Prime Video title in Chrome.
-2. Start the title manually once, then pause it.
-3. Create/join the APS room.
-4. Test APS Pause and Play separately.
-5. Test -10, +10 and timeline seek separately.
-6. Refresh one Prime tab, wait 3–5 seconds, and test again.
-7. Refresh both tabs, wait 3–5 seconds, then use Resync.
-8. Confirm Netflix still behaves exactly as before.
-
-DRM BOUNDARY
-APS synchronizes each participant's local player and does not retransmit, record or bypass protected OTT content.
+Real-device confirmation still required for two-laptop WebRTC, signed-in OTT playback, Chrome Picture-in-Picture, and screen sharing.

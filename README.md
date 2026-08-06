@@ -4,11 +4,11 @@ APS Watch Together is a private Chrome extension for synchronized Netflix, Prime
 
 > APS Watch Together never streams, copies, records or retransmits a movie. Every participant watches through their own legal account. The project is independent and is not affiliated with Netflix, Amazon or ZEE5.
 
-## Version 1.5.1 — Collaboration + Prime Stability Update
+## Version 1.6.0 — Collaboration + Prime Stability Update
 
 Everything from v1.4.0 remains available, including Netflix-safe playback control, live camera/microphone attachment, device switching without rejoining, Cinema Mode and independent Me/Friends visibility.
 
-New in v1.5.1:
+New in v1.6.0:
 
 - **Dedicated Prime Video control bridge** instead of the generic raw-video path
 - Prime Play and Pause no longer perform an immediate timestamp write
@@ -26,7 +26,7 @@ New in v1.5.1:
 - Compact organized camera dock while a screen share is visible
 - **Direct room invitation links** in addition to room codes
 - Professional invitation page hosted by the existing APS room server
-- Invite links prefill the room code and open the APS side panel when v1.5.1 is installed
+- Invite links prefill the room code and open the APS side panel when v1.6.0 is installed
 - Existing room locking, host-only/shared control, chat and reactions are preserved
 
 ## Complete feature set
@@ -74,12 +74,12 @@ https://YOUR-ROOM-SERVER/join/ABCD-EFGH
 
 A friend can:
 
-1. Click the link with APS v1.5.1 installed.
+1. Click the link with APS v1.6.0 installed.
 2. Click **Open APS and join room** on the invitation page.
 3. Enter their name if it is not already saved.
 4. Join with the room code already filled in.
 
-The invitation page also displays the normal room code, so joining by code remains available. The link cannot silently install the unpacked Chrome extension; the friend must install v1.5.1 first.
+The invitation page also displays the normal room code, so joining by code remains available. The link cannot silently install the unpacked Chrome extension; the friend must install v1.6.0 first.
 
 ## Tested status
 
@@ -168,7 +168,7 @@ ws://localhost:8787/ws
 
 ## 4. Deploy for remote friends
 
-This update changes both the extension and the server. Upload the complete v1.5.1 source to the GitHub repository. Render's `autoDeploy: true` setting should redeploy the server automatically. Wait for **Live** before sharing the new package.
+This update changes both the extension and the server. Upload the complete v1.6.0 source to the GitHub repository. Render's `autoDeploy: true` setting should redeploy the server automatically. Wait for **Live** before sharing the new package.
 
 Render Blueprint steps:
 
@@ -206,4 +206,4 @@ The build tool inserts both the WebSocket server URL and the corresponding secur
 
 ## Browser scope
 
-Version 1.5.1 is Chrome-first on macOS, Windows and desktop ChromeOS. Mobile Chrome cannot install this unpacked extension. Safari would require separate Xcode packaging and live platform testing.
+Version 1.6.0 is Chrome-first on macOS, Windows and desktop ChromeOS. Mobile Chrome cannot install this unpacked extension. Safari would require separate Xcode packaging and live platform testing.

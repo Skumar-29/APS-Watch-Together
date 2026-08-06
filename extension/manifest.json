@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "APS Watch Together",
   "short_name": "APS Watch",
-  "version": "1.5.1",
+  "version": "1.6.0",
   "description": "Private synchronized watch rooms with stable Prime Video controls, screen sharing, direct invite links, modern camera layouts and hot-swappable call devices.",
   "minimum_chrome_version": "141",
   "permissions": [

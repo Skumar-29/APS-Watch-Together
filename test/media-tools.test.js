@@ -23,14 +23,14 @@ test('adds an exact selected device without mutating the original constraints', 
   assert.deepEqual(result, { echoCancellation: true, deviceId: { exact: 'device-123' } });
 });
 
-test('v1.5.1 preserves live device switching in both full and Cinema controls', () => {
+test('v1.6.0 preserves live device switching in both full and Cinema controls', () => {
   const manifest = JSON.parse(read('manifest.json'));
   const sidepanel = read('sidepanel.js');
   const cinema = read('cinema.js');
   const sidepanelHtml = read('sidepanel.html');
   const cinemaHtml = read('cinema.html');
 
-  assert.equal(manifest.version, '1.5.1');
+  assert.equal(manifest.version, '1.6.0');
   assert.match(sidepanel, /devicechange/);
   assert.match(sidepanel, /replaceLocalTrack/);
   assert.match(sidepanel, /applySelectedDevices/);
