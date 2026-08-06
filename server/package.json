@@ -1,6 +1,6 @@
 {
   "name": "aps-watch-together-server",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "private": true,
   "description": "Zero-dependency room, signalling, playback synchronization, direct invite and screen-presenter service for APS Watch Together.",
   "type": "module",

@@ -18,7 +18,7 @@
     "https://*.amazon.in/*",
     "https://*.amazon.com.au/*",
     "https://*.zee5.com/*",
-    "http://localhost:8787/*"
+    "https://aps-watch-together-server.onrender.com/*"
   ],
   "background": {
     "service_worker": "background.js",
@@ -84,7 +84,7 @@
     },
     {
       "matches": [
-        "http://localhost:8787/join/*"
+        "https://aps-watch-together-server.onrender.com/join/*"
       ],
       "js": [
         "invite.js"

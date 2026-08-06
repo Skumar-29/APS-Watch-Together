@@ -196,7 +196,7 @@ const server = http.createServer((req, res) => {
 
   if (url.pathname === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ ok: true, service: 'aps-watch-together', version: '1.6.0', rooms: rooms.size, clients: clients.size, now: new Date().toISOString() }));
+    res.end(JSON.stringify({ ok: true, service: 'aps-watch-together', version: '1.6.1', rooms: rooms.size, clients: clients.size, now: new Date().toISOString() }));
     return;
   }
 

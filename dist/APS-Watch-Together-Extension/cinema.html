@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>APS Cinema Mode</title>
+  <link rel="stylesheet" href="cinema.css">
+</head>
+<body>
+  <main class="cinema-shell">
+    <header class="cinema-header">
+      <div class="brand">
+        <div class="brand-icon">▶</div>
+        <div><strong>APS Cinema Mode</strong><span id="connectionText">Connecting securely…</span></div>
+      </div>
+      <span id="roleBadge" class="role-badge">ROOM</span>
+    </header>
+
+    <section class="view-toolbar" aria-label="Camera view controls">
+      <div class="view-copy"><strong>Camera views</strong><span>Hide previews without turning cameras off</span></div>
+      <div class="view-actions">
+        <button id="selfViewBtn" class="view-btn active" type="button" aria-pressed="true" title="Show or hide your camera preview">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm-7 8a7 7 0 0 1 14 0H5Z"/></svg>
+          Me
+        </button>
+        <button id="friendsViewBtn" class="view-btn active" type="button" aria-pressed="true" title="Show or hide friends' camera previews">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8.5 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7ZM2 20a6.5 6.5 0 0 1 13 0H2Zm14.5-9a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm-.8 2.2A6.8 6.8 0 0 1 19 19h3a5.5 5.5 0 0 0-6.3-5.8Z"/></svg>
+          Friends
+        </button>
+      </div>
+    </section>
+
+    <section id="cinemaScreenStage" class="cinema-screen-stage" hidden>
+      <div class="cinema-screen-head"><div><span class="share-live-dot"></span><strong id="cinemaScreenPresenter">Screen share</strong><small id="cinemaScreenStatus">Connecting…</small></div><button id="cinemaScreenToggleBtn" type="button">Hide</button></div>
+      <div class="cinema-screen-canvas"><video id="cinemaScreenVideo" autoplay playsinline></video><div id="cinemaScreenFallback"><span>▣</span><strong>Connecting to shared screen…</strong></div></div>
+    </section>
+    <button id="cinemaScreenHiddenBar" class="cinema-screen-hidden" type="button" hidden><span class="share-live-dot"></span><strong id="cinemaScreenHiddenText">Screen share hidden</strong><small>Show</small></button>
+
+    <section id="cameraStage" class="camera-stage show-self show-friends" aria-live="polite">
+      <article class="camera-card self-card" id="selfCard" data-view-card="self">
+        <video id="localVideo" autoplay muted playsinline></video>
+        <div id="videoFallback" class="video-fallback"><span id="initial">Y</span></div>
+        <div class="video-gradient"></div>
+        <div class="video-meta">
+          <span><strong id="displayName">You</strong><small id="roomCode">——</small></span>
+          <span id="liveIndicator" class="live-indicator">LIVE</span>
+        </div>
+      </article>
+
+      <div id="remoteGrid" class="remote-grid" data-view-card="friends"></div>
+
+      <div id="viewsHidden" class="views-hidden" hidden>
+        <span class="hidden-icon">◉</span>
+        <strong>Camera previews hidden</strong>
+        <small>Your call and movie synchronization are still active.</small>
+      </div>
+    </section>
+
+    <div class="status-row">
+      <span id="participantText">1 participant</span>
+      <span id="syncText"><i></i> Movie sync active</span>
+    </div>
+
+    <div class="controls">
+      <button id="micBtn" class="circle-btn active" type="button" title="Mute microphone" aria-label="Mute microphone">
+        <svg viewBox="0 0 24 24"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.9V22h2v-3.1A7 7 0 0 0 19 12h-2Z"/></svg><span class="action-badge">+</span>
+      </button>
+      <button id="cameraBtn" class="circle-btn active" type="button" title="Turn camera off" aria-label="Turn camera off">
+        <svg viewBox="0 0 24 24"><path d="M4 5h11a2 2 0 0 1 2 2v2.2l4-2.5v10.6l-4-2.5V17a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/></svg><span class="action-badge">+</span>
+      </button>
+      <button id="shareScreenBtn" class="circle-btn share-circle" type="button" title="Share screen" aria-label="Share screen">
+        <svg viewBox="0 0 24 24"><path d="M3 4h18v13H3V4Zm2 2v9h14V6H5Zm6 12h2v2h4v2H7v-2h4v-2Zm1-10 4 4h-3v2h-2v-2H8l4-4Z"/></svg>
+      </button>
+      <button id="devicesBtn" class="circle-btn" type="button" title="Call device settings" aria-label="Call device settings">
+        <svg viewBox="0 0 24 24"><path d="M4 7h9v2H4V7Zm0 8h5v2H4v-2Zm12-9h4v4h-4V9h-1V7h1V6Zm-4 8h8v2h-8v1h-2v-4h2v1Z"/></svg>
+      </button>
+      <button id="floatBtn" class="wide-btn" type="button" title="Open a movable always-on-top camera window">
+        <svg viewBox="0 0 24 24"><path d="M4 4h16v12H4V4Zm2 2v8h12V6H6Zm3 12h6v2H9v-2Z"/></svg>
+        Float call
+      </button>
+      <button id="restoreBtn" class="wide-btn primary" type="button" title="Bring back full controls">
+        <svg viewBox="0 0 24 24"><path d="M4 5h16v14H4V5Zm2 2v10h12V7H6Zm2 2h8v2H8V9Zm0 4h5v2H8v-2Z"/></svg>
+        Full controls
+      </button>
+    </div>
+
+    <section id="cinemaDevicePanel" class="cinema-device-panel" hidden>
+      <div class="cinema-device-header"><div><strong>Call devices</strong><span>Change devices without leaving</span></div><button id="closeDevicesBtn" type="button">×</button></div>
+      <label><span>Camera</span><select id="cinemaCameraSelect"><option value="">Automatic camera</option></select></label>
+      <label><span>Microphone</span><select id="cinemaMicSelect"><option value="">Automatic microphone</option></select></label>
+      <label id="cinemaSpeakerField"><span>Speaker</span><select id="cinemaSpeakerSelect"><option value="">System default</option></select></label>
+      <div class="cinema-device-actions"><button id="cinemaRefreshDevicesBtn" type="button">Refresh</button><button id="cinemaApplyDevicesBtn" type="button">Apply</button></div>
+      <p id="cinemaDeviceStatus">Connect a device at any time; APS will detect it.</p>
+    </section>
+
+    <button id="leaveBtn" class="leave-btn" type="button">Leave room</button>
+    <p id="hint" class="hint">Show Me, Friends or both. Float call stays above the movie and can be dragged anywhere.</p>
+    <div id="remoteAudio" hidden></div>
+  </main>
+  <script type="module" src="cinema.js"></script>
+</body>
+</html>

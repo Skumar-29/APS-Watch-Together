@@ -137,12 +137,12 @@ test('Prime synchronization uses thresholded seeking without playback-rate corre
   assert.equal(main.video.playbackRate, 1);
 });
 
-test('v1.6.0 injects the Prime bridge and suppresses refresh/event feedback', () => {
+test('v1.6.1 injects the Prime bridge and suppresses refresh/event feedback', () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(extensionDir, 'manifest.json'), 'utf8'));
   const content = fs.readFileSync(path.join(extensionDir, 'content.js'), 'utf8');
   const prime = fs.readFileSync(path.join(extensionDir, 'prime-bridge.js'), 'utf8');
 
-  assert.equal(manifest.version, '1.6.0');
+  assert.equal(manifest.version, '1.6.1');
   assert.ok(manifest.content_scripts.some((entry) => entry.js?.includes('prime-bridge.js') && entry.world === 'MAIN'));
   assert.match(content, /APS_PRIME_COMMAND/);
   assert.match(content, /localEventsSuppressedUntil/);

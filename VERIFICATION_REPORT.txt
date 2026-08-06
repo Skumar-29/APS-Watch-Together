@@ -1,7 +1,7 @@
-APS Watch Together v1.6.0 verification
+APS Watch Together v1.6.1 verification
 
 PASS: JavaScript syntax validation for server, side panel, Cinema, background, content, Netflix and Prime bridges
-PASS: Manifest version 1.6.0
+PASS: Manifest version 1.6.1
 PASS: 19 automated regression tests
 PASS: Netflix bridge preserved
 PASS: Prime Video stability bridge preserved

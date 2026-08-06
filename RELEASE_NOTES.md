@@ -1,4 +1,4 @@
-# APS Watch Together v1.6.0
+# APS Watch Together v1.6.1
 
 ## Main improvements
 
